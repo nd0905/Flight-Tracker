@@ -251,10 +251,18 @@ class FlightTracker:
         required_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in must_include_dates]
         excluded_return_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in exclude_return_dates]
         
+        # Check if dates are more than 1 year in advance
+        one_year_from_now = datetime.now().date() + timedelta(days=365)
+        
         # Handle date ranges with trip length
         if "date_range" in route:
             start_date = datetime.strptime(route["date_range"]["start"], "%Y-%m-%d")
             end_date = datetime.strptime(route["date_range"]["end"], "%Y-%m-%d")
+            
+            # Check if start date is too far in future
+            if start_date.date() > one_year_from_now:
+                logger.warning(f"Route {departure} → {destination}: Start date {start_date.date()} is more than 1 year away. Skipping.")
+                return False
             
             # Get trip length settings
             trip_length = route.get("trip_length_days")
@@ -265,6 +273,11 @@ class FlightTracker:
                 date_combinations = []
                 current = start_date
                 while current <= end_date:
+                    # Skip if this departure date is too far in future
+                    if current.date() > one_year_from_now:
+                        current += timedelta(days=1)
+                        continue
+                    
                     # Calculate return dates based on trip length and flexibility
                     min_trip = trip_length - trip_flex
                     max_trip = trip_length + trip_flex
@@ -299,6 +312,11 @@ class FlightTracker:
                 date_combinations = []
                 current = start_date
                 while current <= end_date:
+                    # Skip if this departure date is too far in future
+                    if current.date() > one_year_from_now:
+                        current += timedelta(days=1)
+                        continue
+                    
                     combo = {"outbound": current.strftime("%Y-%m-%d")}
                     if "return_date" in route:
                         return_date_obj = datetime.strptime(route["return_date"], "%Y-%m-%d")
@@ -326,6 +344,13 @@ class FlightTracker:
                     current += timedelta(days=1)
         else:
             # Single date specified
+            departure_date = datetime.strptime(route["date"], "%Y-%m-%d").date()
+            
+            # Check if departure date is too far in future
+            if departure_date > one_year_from_now:
+                logger.warning(f"Route {departure} → {destination}: Departure date {departure_date} is more than 1 year away. Skipping.")
+                return False
+            
             date_combinations = [{"outbound": route["date"]}]
             if "return_date" in route:
                 return_date_obj = datetime.strptime(route["return_date"], "%Y-%m-%d")
