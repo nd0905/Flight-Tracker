@@ -15,6 +15,8 @@ Uses the official Amadeus for Developers API with 2,000 free API calls per month
 - Flexible date ranges (search across multiple dates)
 - Strict date matching for specific travel dates
 - Webhook notifications when price thresholds are met
+- **Built-in web API to view all flight prices** (not just deals)
+- **Smart webhook notifications** - only sends the best price per route
 - Runs continuously in a Docker container
 - Distroless Docker image for security
 
@@ -200,6 +202,33 @@ docker run -d \
 curl http://localhost:8080/status
 ```
 
+### View all flight prices:
+```bash
+curl http://localhost:8080/flights
+```
+
+For detailed API documentation, see [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+
+## API Endpoints
+
+The Flight Tracker includes a built-in web server with two endpoints:
+
+- **`GET /status`** - Service status, tracked routes, and check schedule
+- **`GET /flights`** - All flight prices found in the last check (updated every check cycle)
+
+See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for complete details on the JSON structure and usage examples.
+
+## Webhook Behavior
+
+The Flight Tracker operates with a smart notification system:
+
+1. **Collects ALL flight prices** during each check cycle (accessible via `/flights` endpoint)
+2. **Stores all prices in memory** so you can query them anytime
+3. **Sends webhook notifications ONLY for the best (cheapest) price** below your threshold
+4. **One notification per route** per check cycle with the absolute best deal
+
+This means you can view all available flight options via the API while only receiving notifications for the best deals.
+
 ## Webhook Payload
 
 When a flight meets your price threshold, a POST request is sent to your webhook URL:
@@ -232,7 +261,7 @@ Use a Discord webhook URL directly in the config.
 Use a Slack incoming webhook URL.
 
 ### Home Assistant
-Create an automation triggered by a webhook.
+Create an automation triggered by a webhook. See [HOME_ASSISTANT_SETUP.md](HOME_ASSISTANT_SETUP.md) for complete setup instructions with ready-to-use automations.
 
 ### Custom Endpoint
 Any HTTP endpoint that accepts JSON POST requests.

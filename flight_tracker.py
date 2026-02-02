@@ -33,6 +33,12 @@ status_data = {
     "timestamp": datetime.now().isoformat()
 }
 
+# Global storage for all flight data
+flights_data = {
+    "last_updated": None,
+    "routes": []
+}
+
 
 class StatusHandler(BaseHTTPRequestHandler):
     """Simple HTTP handler to serve status JSON"""
@@ -45,6 +51,12 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps(status_data, indent=2).encode())
+        elif self.path == '/flights':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(flights_data, indent=2).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -136,76 +148,65 @@ class FlightTracker:
             logger.error(f"Error searching flights: {e}")
             return {}
     
-    def get_best_flight(self, flights_data: Dict, allowed_airlines: Optional[List[str]] = None) -> Optional[Dict]:
-        """Extract the best (cheapest) flight from search results"""
+    def get_all_flights(self, flights_data: Dict, allowed_airlines: Optional[List[str]] = None) -> List[Dict]:
+        """Extract all flights from search results with details"""
         if not flights_data or "data" not in flights_data:
-            return None
+            return []
             
         offers = flights_data.get("data", [])
         if not offers:
-            return None
+            return []
         
-        # Filter by allowed airlines if specified
-        if allowed_airlines:
-            filtered_offers = []
-            for offer in offers:
-                # Check all segments for airline codes
-                segments = offer.get("itineraries", [{}])[0].get("segments", [])
-                if segments:
-                    airline_code = segments[0].get("carrierCode", "")
-                    # Get airline name from dictionaries if available
-                    dictionaries = flights_data.get("dictionaries", {})
-                    carriers = dictionaries.get("carriers", {})
-                    airline_name = carriers.get(airline_code, airline_code)
-                    
-                    # Check if any allowed airline matches
-                    if any(allowed.lower() in airline_name.lower() or 
-                          allowed.upper() == airline_code for allowed in allowed_airlines):
-                        filtered_offers.append(offer)
-            
-            if not filtered_offers:
-                logger.info(f"No flights found matching allowed airlines: {allowed_airlines}")
-                return None
-            
-            offers = filtered_offers
-        
-        # Sort by price and get cheapest
-        offers.sort(key=lambda x: float(x.get("price", {}).get("total", 999999)))
-        best = offers[0]
-        
-        # Extract relevant information
-        price = float(best.get("price", {}).get("total", 0))
-        
-        # Get airline info
-        segments = best.get("itineraries", [{}])[0].get("segments", [])
-        airline_code = segments[0].get("carrierCode", "Unknown") if segments else "Unknown"
-        
-        # Get airline name from dictionaries
         dictionaries = flights_data.get("dictionaries", {})
         carriers = dictionaries.get("carriers", {})
-        airline_name = carriers.get(airline_code, airline_code)
+        all_flights = []
         
-        # Get departure and arrival times
-        departure_time = segments[0].get("departure", {}).get("at", "") if segments else None
-        arrival_time = segments[-1].get("arrival", {}).get("at", "") if segments else None
+        for offer in offers:
+            # Get airline info
+            segments = offer.get("itineraries", [{}])[0].get("segments", [])
+            if not segments:
+                continue
+                
+            airline_code = segments[0].get("carrierCode", "Unknown")
+            airline_name = carriers.get(airline_code, airline_code)
+            
+            # Filter by allowed airlines if specified
+            if allowed_airlines:
+                if not any(allowed.lower() in airline_name.lower() or 
+                          allowed.upper() == airline_code for allowed in allowed_airlines):
+                    continue
+            
+            # Extract flight information
+            price = float(offer.get("price", {}).get("total", 0))
+            departure_time = segments[0].get("departure", {}).get("at", "")
+            arrival_time = segments[-1].get("arrival", {}).get("at", "")
+            
+            # Calculate duration
+            duration = None
+            for itinerary in offer.get("itineraries", []):
+                if itinerary.get("duration"):
+                    duration = itinerary["duration"]
+                    break
+            
+            all_flights.append({
+                "price": price,
+                "airline": airline_name,
+                "airline_code": airline_code,
+                "departure_time": departure_time,
+                "arrival_time": arrival_time,
+                "duration": duration,
+                "segments": len(segments),
+                "offer_id": offer.get("id")
+            })
         
-        # Calculate duration
-        duration = None
-        for itinerary in best.get("itineraries", []):
-            if itinerary.get("duration"):
-                duration = itinerary["duration"]
-                break
-        
-        return {
-            "price": price,
-            "airline": airline_name,
-            "airline_code": airline_code,
-            "departure_time": departure_time,
-            "arrival_time": arrival_time,
-            "duration": duration,
-            "segments": len(segments),
-            "offer_id": best.get("id")
-        }
+        # Sort by price
+        all_flights.sort(key=lambda x: x["price"])
+        return all_flights
+    
+    def get_best_flight(self, flights_data: Dict, allowed_airlines: Optional[List[str]] = None) -> Optional[Dict]:
+        """Extract the best (cheapest) flight from search results"""
+        all_flights = self.get_all_flights(flights_data, allowed_airlines)
+        return all_flights[0] if all_flights else None
     
     def send_webhook_notification(self, flight_info: Dict, route_info: Dict):
         """Send notification via webhook when price threshold is met"""
@@ -237,8 +238,10 @@ class FlightTracker:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error sending webhook: {e}")
     
-    def check_flight_route(self, route: Dict) -> bool:
+    def check_flight_route(self, route: Dict, store_all_flights: bool = True) -> bool:
         """Check a single flight route and notify if price is below threshold"""
+        global flights_data
+        
         departure = route["departure"]
         destination = route["destination"]
         max_price = route["max_price"]
@@ -246,6 +249,9 @@ class FlightTracker:
         allowed_airlines = route.get("allowed_airlines")
         must_include_dates = route.get("must_include_dates", [])
         exclude_return_dates = route.get("exclude_return_dates", [])
+        
+        # Storage for all flights found for this route
+        route_flights = []
         
         # Convert must_include_dates to datetime objects for comparison
         required_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in must_include_dates]
@@ -379,6 +385,8 @@ class FlightTracker:
             return False
         
         found_deal = False
+        best_overall_flight = None
+        best_overall_combo = None
         
         for combo in date_combinations:
             outbound = combo["outbound"]
@@ -390,32 +398,94 @@ class FlightTracker:
             logger.info(f"Checking {departure} → {destination} on {outbound}" + 
                        (f" returning {return_date}{trip_info}" if return_date else "") + adults_info)
             
-            flights_data = self.search_flights(departure, destination, outbound, return_date, adults)
+            search_results = self.search_flights(departure, destination, outbound, return_date, adults)
             
-            if not flights_data:
+            if not search_results:
                 continue
-                
-            best_flight = self.get_best_flight(flights_data, allowed_airlines)
             
-            if not best_flight:
+            # Get all flights for this date combination
+            all_flights = self.get_all_flights(search_results, allowed_airlines)
+            
+            if not all_flights:
                 logger.warning(f"No flights found for {departure} → {destination} on {outbound}")
                 continue
             
+            # Store all flights with their date information
+            if store_all_flights:
+                for flight in all_flights:
+                    flight_entry = {
+                        "departure_airport": departure,
+                        "destination_airport": destination,
+                        "outbound_date": outbound,
+                        "return_date": return_date,
+                        "trip_days": trip_days,
+                        "adults": adults,
+                        "price": flight["price"],
+                        "airline": flight["airline"],
+                        "airline_code": flight["airline_code"],
+                        "departure_time": flight["departure_time"],
+                        "arrival_time": flight["arrival_time"],
+                        "duration": flight["duration"],
+                        "segments": flight["segments"],
+                        "checked_at": datetime.now().isoformat()
+                    }
+                    route_flights.append(flight_entry)
+            
+            best_flight = all_flights[0]  # Already sorted by price
             price = best_flight["price"]
             logger.info(f"Best price: ${price} (threshold: ${max_price}) - {best_flight['airline']}")
             
+            # Track the best flight across all date combinations
             if price <= max_price:
-                logger.info(f"🎉 Price alert! Flight found at ${price}")
-                route_info = route.copy()
-                route_info["date"] = outbound
-                route_info["return_date"] = return_date
-                if trip_days:
-                    route_info["trip_length"] = trip_days
-                self.send_webhook_notification(best_flight, route_info)
-                found_deal = True
+                if best_overall_flight is None or price < best_overall_flight["price"]:
+                    best_overall_flight = best_flight
+                    best_overall_combo = {
+                        "outbound": outbound,
+                        "return": return_date,
+                        "trip_days": trip_days
+                    }
+                    found_deal = True
             
             # Rate limiting - Amadeus allows more requests but be respectful
             time.sleep(1)
+        
+        # Store all flights for this route
+        if store_all_flights and route_flights:
+            # Find or create route entry in global storage
+            route_entry = None
+            for r in flights_data["routes"]:
+                if (r["departure"] == departure and 
+                    r["destination"] == destination and
+                    r["max_price"] == max_price):
+                    route_entry = r
+                    break
+            
+            if route_entry is None:
+                route_entry = {
+                    "departure": departure,
+                    "destination": destination,
+                    "description": route.get("description", ""),
+                    "max_price": max_price,
+                    "flights": []
+                }
+                flights_data["routes"].append(route_entry)
+            
+            # Replace flights with latest data
+            route_entry["flights"] = route_flights
+            route_entry["last_checked"] = datetime.now().isoformat()
+            route_entry["best_price"] = min(f["price"] for f in route_flights)
+            route_entry["flights_found"] = len(route_flights)
+            flights_data["last_updated"] = datetime.now().isoformat()
+        
+        # Send webhook only for the best flight if one was found
+        if found_deal and best_overall_flight and best_overall_combo:
+            logger.info(f"🎉 Price alert! Best flight found at ${best_overall_flight['price']}")
+            route_info = route.copy()
+            route_info["date"] = best_overall_combo["outbound"]
+            route_info["return_date"] = best_overall_combo["return"]
+            if best_overall_combo["trip_days"]:
+                route_info["trip_length"] = best_overall_combo["trip_days"]
+            self.send_webhook_notification(best_overall_flight, route_info)
         
         return found_deal
 
