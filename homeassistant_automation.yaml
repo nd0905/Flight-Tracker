@@ -1,0 +1,143 @@
+# Home Assistant Automation for Flight Tracker Webhooks
+# 
+# Setup Instructions:
+# 1. In Home Assistant, go to Settings > Automations & Scenes
+# 2. Click "Create Automation" > "Create new automation" > "Edit in YAML"
+# 3. Copy and paste this automation
+# 4. Update the webhook_id in the trigger (change "flight_tracker" to your preferred ID)
+# 5. Update your Flight-Tracker config.json webhook_url to:
+#    http://YOUR_HOME_ASSISTANT_IP:8123/api/webhook/flight_tracker
+# 6. Optionally customize notification targets and messages
+# 7. Save the automation
+
+alias: "Flight Tracker Notifications"
+description: "Handle webhooks from Flight Tracker for startup and price alerts"
+mode: queued
+max: 10
+
+trigger:
+  - platform: webhook
+    allowed_methods:
+      - POST
+    local_only: false
+    webhook_id: flight_tracker
+
+condition: []
+
+action:
+  # Check if this is a startup notification
+  - choose:
+      # Startup Notification Handler
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.json.type == 'startup' }}"
+        sequence:
+          - service: notify.notify
+            data:
+              title: "✈️ Flight Tracker Started"
+              message: >
+                {{ trigger.json.message }}
+                
+                Status: {{ trigger.json.status | title }}
+                Routes Tracked: {{ trigger.json.routes_tracked }}
+                Check Interval: {{ trigger.json.check_interval_hours }} hours
+                Next Check: {{ as_timestamp(trigger.json.next_check) | timestamp_custom('%b %d at %I:%M %p') }}
+                
+                {% if trigger.json.routes | length > 0 %}
+                Routes:
+                {% for route in trigger.json.routes %}
+                  • {{ route.departure }} → {{ route.destination }}{% if route.description %}: {{ route.description }}{% endif %}
+                {% endfor %}
+                {% endif %}
+              data:
+                # For mobile app notifications
+                priority: high
+                notification_icon: mdi:airplane-takeoff
+                tag: flight_tracker_startup
+                # For persistent notification
+                actions:
+                  - action: URI
+                    title: "View Status"
+                    uri: "http://YOUR_SERVER_IP:8080/status"
+
+          # Optional: Create a persistent notification that stays until dismissed
+          - service: persistent_notification.create
+            data:
+              title: "Flight Tracker Status"
+              message: >
+                Status: {{ trigger.json.status | upper }}
+                
+                Tracking {{ trigger.json.routes_tracked }} routes
+                Check interval: Every {{ trigger.json.check_interval_hours }} hours
+                
+                {% if trigger.json.routes | length > 0 %}
+                Monitored Routes:
+                {% for route in trigger.json.routes %}
+                - {{ route.departure }} → {{ route.destination }}
+                {% endfor %}
+                {% endif %}
+              notification_id: flight_tracker_status
+
+      # Flight Price Alert Handler
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.json.route is defined and trigger.json.price is defined }}"
+        sequence:
+          - service: notify.notify
+            data:
+              title: "🎉 Flight Price Alert!"
+              message: >
+                {{ trigger.json.route }}
+                
+                💰 Price: ${{ trigger.json.price }} (Threshold: ${{ trigger.json.threshold }})
+                ✈️ Airline: {{ trigger.json.airline }}
+                
+                📅 Departure: {{ trigger.json.date }}
+                {% if trigger.json.return_date %}🔙 Return: {{ trigger.json.return_date }}{% endif %}
+                {% if trigger.json.trip_length %}📆 Trip Length: {{ trigger.json.trip_length }} days{% endif %}
+                {% if trigger.json.adults > 1 %}👥 Adults: {{ trigger.json.adults }}{% endif %}
+                
+                {% if trigger.json.departure_time %}🛫 Depart: {{ trigger.json.departure_time | replace('T', ' ') }}{% endif %}
+                {% if trigger.json.arrival_time %}🛬 Arrive: {{ trigger.json.arrival_time | replace('T', ' ') }}{% endif %}
+                {% if trigger.json.duration %}⏱️ Duration: {{ trigger.json.duration }}{% endif %}
+                {% if trigger.json.segments > 1 %}🔄 {{ trigger.json.segments - 1 }} stop(s){% else %}✈️ Direct flight{% endif %}
+              data:
+                # For mobile app notifications
+                priority: high
+                notification_icon: mdi:airplane-alert
+                tag: "flight_alert_{{ trigger.json.route | replace(' ', '_') }}"
+                # Action buttons for mobile app
+                actions:
+                  - action: URI
+                    title: "Search Flights"
+                    uri: "https://www.google.com/travel/flights"
+                  - action: URI
+                    title: "Book Now"
+                    uri: "https://www.amadeus.com"
+
+          # Optional: Send to specific devices or notification services
+          # Uncomment and customize as needed:
+          
+          # - service: notify.mobile_app_YOUR_PHONE
+          #   data:
+          #     title: "🎉 Flight Price Alert!"
+          #     message: "${{ trigger.json.price }} flight to {{ trigger.json.route }}"
+          
+          # - service: notify.alexa_media
+          #   data:
+          #     message: "Flight price alert! A flight for {{ trigger.json.route }} is now available for {{ trigger.json.price }} dollars."
+          #     data:
+          #       type: announce
+          
+          # - service: tts.google_translate_say
+          #   data:
+          #     entity_id: media_player.living_room_speaker
+          #     message: "Flight alert! {{ trigger.json.route }} is now {{ trigger.json.price }} dollars."
+
+    # Default action if webhook doesn't match expected format
+    default:
+      - service: system_log.write
+        data:
+          message: "Received unexpected webhook data from flight tracker"
+          level: warning
+

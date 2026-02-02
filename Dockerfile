@@ -16,7 +16,6 @@ COPY --from=builder /root/.local /root/.local
 
 # Copy application files
 COPY flight_tracker.py /app/
-COPY config.json /app/
 
 WORKDIR /app
 
