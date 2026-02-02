@@ -1,0 +1,60 @@
+{
+  "amadeus_api_key": "YOUR_AMADEUS_API_KEY",
+  "amadeus_api_secret": "YOUR_AMADEUS_API_SECRET",
+  "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
+  "web_port": 8080,
+  "check_interval_hours": 168,
+  "routes": [
+    {
+      "departure": "DEN",
+      "destination": "ORD",
+      "date_range": {
+        "start": "2026-12-18",
+        "end": "2026-12-22"
+      },
+      "trip_length_days": 8,
+      "trip_flex_days": 2,
+      "must_include_dates": ["2026-12-25", "2026-12-26"],
+      "exclude_return_dates": ["2026-12-26"],
+      "adults": 1,
+      "max_price": 400,
+      "description": "Denver to Chicago O'Hare - Christmas 2026, don't return on 26th"
+    },
+    {
+      "departure": "DEN",
+      "destination": "PVR",
+      "date_range": {
+        "start": "2027-03-15",
+        "end": "2027-03-21"
+      },
+      "trip_length_days": 8,
+      "trip_flex_days": 2,
+      "adults": 1,
+      "max_price": 500,
+      "description": "Denver to Puerto Vallarta - 3rd week of March 2027 (6-10 day trip)"
+    },
+    {
+      "departure": "LAX",
+      "destination": "JFK",
+      "date": "2026-06-15",
+      "return_date": "2026-06-22",
+      "adults": 2,
+      "allowed_airlines": ["United", "Delta", "American"],
+      "max_price": 800,
+      "description": "Los Angeles to New York - Fixed dates, 2 adults, major carriers only"
+    },
+    {
+      "departure": "SFO",
+      "destination": "HNL",
+      "date_range": {
+        "start": "2026-08-01",
+        "end": "2026-08-10"
+      },
+      "trip_length_days": 7,
+      "trip_flex_days": 1,
+      "adults": 4,
+      "max_price": 2000,
+      "description": "San Francisco to Honolulu - Family vacation, flexible dates"
+    }
+  ]
+}

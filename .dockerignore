@@ -1,0 +1,51 @@
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+venv/
+env/
+ENV/
+
+# Config files with secrets
+config.json
+config-paid.json
+.env
+
+# macOS
+.DS_Store
+._*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+README.md
+*.md
+LICENSE
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Build artifacts
+dist/
+build/
