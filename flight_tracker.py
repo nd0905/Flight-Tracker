@@ -496,6 +496,103 @@ def load_config(config_path: str = "config.json") -> Dict:
         return json.load(f)
 
 
+def calculate_api_requests_per_route(route: Dict) -> int:
+    """Calculate how many API requests will be made for a single route per check"""
+    one_year_from_now = datetime.now().date() + timedelta(days=365)
+    
+    # Handle date ranges
+    if "date_range" in route:
+        start_date = datetime.strptime(route["date_range"]["start"], "%Y-%m-%d")
+        end_date = datetime.strptime(route["date_range"]["end"], "%Y-%m-%d")
+        
+        # Skip if start date is too far in future
+        if start_date.date() > one_year_from_now:
+            return 0
+        
+        # Get trip length settings
+        trip_length = route.get("trip_length_days")
+        trip_flex = route.get("trip_flex_days", 0)
+        must_include_dates = route.get("must_include_dates", [])
+        exclude_return_dates = route.get("exclude_return_dates", [])
+        
+        required_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in must_include_dates]
+        excluded_return_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in exclude_return_dates]
+        
+        if trip_length is not None:
+            # Count valid date combinations
+            count = 0
+            current = start_date
+            while current <= end_date:
+                # Skip if this departure date is too far in future
+                if current.date() > one_year_from_now:
+                    current += timedelta(days=1)
+                    continue
+                
+                # Calculate return dates based on trip length and flexibility
+                min_trip = trip_length - trip_flex
+                max_trip = trip_length + trip_flex
+                
+                for days in range(min_trip, max_trip + 1):
+                    return_date = current + timedelta(days=days)
+                    
+                    # Check if return date is excluded
+                    if return_date.date() in excluded_return_dates:
+                        continue
+                    
+                    # Check if this trip covers all required dates
+                    if required_dates:
+                        trip_start = current.date()
+                        trip_end = return_date.date()
+                        covers_required = all(
+                            trip_start <= req_date <= trip_end 
+                            for req_date in required_dates
+                        )
+                        if not covers_required:
+                            continue
+                    
+                    count += 1
+                
+                current += timedelta(days=1)
+            return count
+        else:
+            # No trip length specified, count outbound dates
+            count = 0
+            current = start_date
+            while current <= end_date:
+                if current.date() <= one_year_from_now:
+                    count += 1
+                current += timedelta(days=1)
+            return count
+    else:
+        # Single date specified
+        departure_date = datetime.strptime(route["date"], "%Y-%m-%d").date()
+        
+        # Check if departure date is too far in future
+        if departure_date > one_year_from_now:
+            return 0
+        
+        return 1
+
+
+def calculate_total_api_requests(routes: List[Dict]) -> Dict:
+    """Calculate total API requests for all routes"""
+    requests_per_route = []
+    total = 0
+    
+    for route in routes:
+        count = calculate_api_requests_per_route(route)
+        total += count
+        requests_per_route.append({
+            "route": f"{route.get('departure')} → {route.get('destination')}",
+            "requests": count
+        })
+    
+    return {
+        "total_per_check": total,
+        "per_route": requests_per_route
+    }
+
+
 def main():
     """Main execution loop"""
     global status_data
@@ -546,6 +643,9 @@ def main():
     
     check_interval = config.get("check_interval_hours", 6)
     
+    # Calculate API requests
+    api_requests = calculate_total_api_requests(routes)
+    
     # Update status data
     status_data = {
         "type": "startup",
@@ -561,6 +661,9 @@ def main():
             for r in routes
         ],
         "check_interval_hours": check_interval,
+        "api_requests_per_check": api_requests["total_per_check"],
+        "api_requests_per_route": api_requests["per_route"],
+        "estimated_monthly_requests": api_requests["total_per_check"] * (720 // check_interval),
         "last_check": None,
         "next_check": (datetime.now() + timedelta(hours=check_interval)).isoformat(),
         "timestamp": datetime.now().isoformat()

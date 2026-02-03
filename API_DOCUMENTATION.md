@@ -6,7 +6,7 @@ The Flight Tracker includes a built-in web server that exposes flight data throu
 
 ### GET `/status`
 
-Returns the current status of the Flight Tracker service.
+Returns the current status of the Flight Tracker service, including API usage estimates.
 
 **URL:** `http://localhost:8080/status` (or use your configured `web_port`)
 
@@ -25,11 +25,29 @@ Returns the current status of the Flight Tracker service.
     }
   ],
   "check_interval_hours": 168,
+  "api_requests_per_check": 45,
+  "api_requests_per_route": [
+    {
+      "route": "DEN → ORD",
+      "requests": 30
+    },
+    {
+      "route": "LAX → JFK",
+      "requests": 1
+    }
+  ],
+  "estimated_monthly_requests": 194,
   "last_check": "2024-01-15T14:30:00.123456",
   "next_check": "2024-01-22T14:30:00.123456",
   "timestamp": "2024-01-15T14:30:00.123456"
 }
 ```
+
+**Response Fields:**
+
+- `api_requests_per_check`: Total number of API calls that will be made in each check cycle
+- `api_requests_per_route`: Breakdown of API calls per route
+- `estimated_monthly_requests`: Approximate API calls per month based on check interval (assumes 720 hours/month)
 
 ### GET `/flights`
 
