@@ -17,6 +17,8 @@ Uses the official Amadeus for Developers API with 2,000 free API calls per month
 - Webhook notifications when price thresholds are met
 - **Built-in web API to view all flight prices** (not just deals)
 - **Smart webhook notifications** - only sends the best price per route
+- **Hot-reload configuration** - edit config.json without restarting
+- **API usage tracking** - see estimated monthly API requests
 - Runs continuously in a Docker container
 - Distroless Docker image for security
 
@@ -35,6 +37,17 @@ Create a `config.json` file from the example:
 cp config.json.example config.json
 # Edit config.json with your credentials and routes
 ```
+
+### Hot-Reload Configuration
+
+The Flight Tracker automatically detects changes to `config.json` and reloads the configuration without restarting:
+
+- **Add/remove/modify routes** - Changes apply at the next check cycle
+- **Change check interval** - New interval takes effect immediately
+- **Update webhook URL** - New URL used for next notification
+- **API credentials changes** - Requires a restart (warning will be logged)
+
+Simply edit `config.json` and save - the tracker will detect the change and reload automatically. A webhook notification confirms successful reload.
 
 Configuration example:
 
@@ -233,6 +246,7 @@ This means you can view all available flight options via the API while only rece
 
 When a flight meets your price threshold, a POST request is sent to your webhook URL:
 
+**Price Alert:**
 ```json
 {
   "route": "SFO → JFK",
@@ -246,6 +260,19 @@ When a flight meets your price threshold, a POST request is sent to your webhook
   "departure_time": "08:00",
   "arrival_time": "16:30",
   "duration": "5h 30m",
+  "timestamp": "2024-02-02T10:30:00"
+}
+```
+
+**Config Reload Notification:**
+```json
+{
+  "type": "config_reload",
+  "status": "success",
+  "message": "Configuration reloaded successfully",
+  "routes_tracked": 5,
+  "check_interval_hours": 24,
+  "api_requests_per_check": 150,
   "timestamp": "2024-02-02T10:30:00"
 }
 ```

@@ -13,6 +13,7 @@ from typing import List, Dict, Optional
 import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -496,103 +497,6 @@ def load_config(config_path: str = "config.json") -> Dict:
         return json.load(f)
 
 
-def calculate_api_requests_per_route(route: Dict) -> int:
-    """Calculate how many API requests will be made for a single route per check"""
-    one_year_from_now = datetime.now().date() + timedelta(days=365)
-    
-    # Handle date ranges
-    if "date_range" in route:
-        start_date = datetime.strptime(route["date_range"]["start"], "%Y-%m-%d")
-        end_date = datetime.strptime(route["date_range"]["end"], "%Y-%m-%d")
-        
-        # Skip if start date is too far in future
-        if start_date.date() > one_year_from_now:
-            return 0
-        
-        # Get trip length settings
-        trip_length = route.get("trip_length_days")
-        trip_flex = route.get("trip_flex_days", 0)
-        must_include_dates = route.get("must_include_dates", [])
-        exclude_return_dates = route.get("exclude_return_dates", [])
-        
-        required_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in must_include_dates]
-        excluded_return_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in exclude_return_dates]
-        
-        if trip_length is not None:
-            # Count valid date combinations
-            count = 0
-            current = start_date
-            while current <= end_date:
-                # Skip if this departure date is too far in future
-                if current.date() > one_year_from_now:
-                    current += timedelta(days=1)
-                    continue
-                
-                # Calculate return dates based on trip length and flexibility
-                min_trip = trip_length - trip_flex
-                max_trip = trip_length + trip_flex
-                
-                for days in range(min_trip, max_trip + 1):
-                    return_date = current + timedelta(days=days)
-                    
-                    # Check if return date is excluded
-                    if return_date.date() in excluded_return_dates:
-                        continue
-                    
-                    # Check if this trip covers all required dates
-                    if required_dates:
-                        trip_start = current.date()
-                        trip_end = return_date.date()
-                        covers_required = all(
-                            trip_start <= req_date <= trip_end 
-                            for req_date in required_dates
-                        )
-                        if not covers_required:
-                            continue
-                    
-                    count += 1
-                
-                current += timedelta(days=1)
-            return count
-        else:
-            # No trip length specified, count outbound dates
-            count = 0
-            current = start_date
-            while current <= end_date:
-                if current.date() <= one_year_from_now:
-                    count += 1
-                current += timedelta(days=1)
-            return count
-    else:
-        # Single date specified
-        departure_date = datetime.strptime(route["date"], "%Y-%m-%d").date()
-        
-        # Check if departure date is too far in future
-        if departure_date > one_year_from_now:
-            return 0
-        
-        return 1
-
-
-def calculate_total_api_requests(routes: List[Dict]) -> Dict:
-    """Calculate total API requests for all routes"""
-    requests_per_route = []
-    total = 0
-    
-    for route in routes:
-        count = calculate_api_requests_per_route(route)
-        total += count
-        requests_per_route.append({
-            "route": f"{route.get('departure')} → {route.get('destination')}",
-            "requests": count
-        })
-    
-    return {
-        "total_per_check": total,
-        "per_route": requests_per_route
-    }
-
-
 def main():
     """Main execution loop"""
     global status_data
@@ -643,9 +547,6 @@ def main():
     
     check_interval = config.get("check_interval_hours", 6)
     
-    # Calculate API requests
-    api_requests = calculate_total_api_requests(routes)
-    
     # Update status data
     status_data = {
         "type": "startup",
@@ -661,9 +562,6 @@ def main():
             for r in routes
         ],
         "check_interval_hours": check_interval,
-        "api_requests_per_check": api_requests["total_per_check"],
-        "api_requests_per_route": api_requests["per_route"],
-        "estimated_monthly_requests": api_requests["total_per_check"] * (720 // check_interval),
         "last_check": None,
         "next_check": (datetime.now() + timedelta(hours=check_interval)).isoformat(),
         "timestamp": datetime.now().isoformat()
@@ -693,9 +591,95 @@ def main():
     # Check interval in seconds
     check_interval_seconds = check_interval * 3600
     
+    # Track config file modification time
+    last_config_mtime = get_config_mtime(config_path)
+    
     while True:
         logger.info("=" * 60)
         logger.info("Starting new check cycle")
+        
+        # Check for config file changes
+        current_mtime = get_config_mtime(config_path)
+        if current_mtime != last_config_mtime:
+            logger.info("Configuration file changed, reloading...")
+            try:
+                new_config = load_config(config_path)
+                
+                # Validate the config change
+                if validate_config_change(config, new_config):
+                    # Update routes
+                    old_routes = routes
+                    routes = new_config.get("routes", [])
+                    
+                    # Update check interval
+                    old_interval = check_interval
+                    check_interval = new_config.get("check_interval_hours", 6)
+                    check_interval_seconds = check_interval * 3600
+                    
+                    # Update webhook URL if changed
+                    new_webhook = os.getenv("WEBHOOK_URL", new_config.get("webhook_url"))
+                    if new_webhook != webhook_url:
+                        webhook_url = new_webhook
+                        tracker = FlightTracker(auth, webhook_url)
+                    
+                    # Recalculate API requests
+                    api_requests = calculate_total_api_requests(routes)
+                    
+                    # Update status data
+                    status_data["routes_tracked"] = len(routes)
+                    status_data["routes"] = [
+                        {
+                            "departure": r.get("departure"),
+                            "destination": r.get("destination"),
+                            "description": r.get("description", "")
+                        }
+                        for r in routes
+                    ]
+                    status_data["check_interval_hours"] = check_interval
+                    status_data["api_requests_per_check"] = api_requests["total_per_check"]
+                    status_data["api_requests_per_route"] = api_requests["per_route"]
+                    status_data["estimated_monthly_requests"] = api_requests["total_per_check"] * (720 // check_interval)
+                    status_data["config_last_reloaded"] = datetime.now().isoformat()
+                    
+                    # Update stored config
+                    config = new_config
+                    last_config_mtime = current_mtime
+                    
+                    logger.info(f"Configuration reloaded successfully")
+                    logger.info(f"Routes: {len(old_routes)} → {len(routes)}")
+                    if old_interval != check_interval:
+                        logger.info(f"Check interval: {old_interval}h → {check_interval}h")
+                    
+                    # Send notification about config reload
+                    try:
+                        reload_payload = {
+                            "type": "config_reload",
+                            "status": "success",
+                            "message": "Configuration reloaded successfully",
+                            "routes_tracked": len(routes),
+                            "check_interval_hours": check_interval,
+                            "api_requests_per_check": api_requests["total_per_check"],
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        response = requests.post(
+                            webhook_url,
+                            json=reload_payload,
+                            headers={"Content-Type": "application/json"},
+                            timeout=10
+                        )
+                        response.raise_for_status()
+                    except requests.exceptions.RequestException as e:
+                        logger.error(f"Error sending config reload notification: {e}")
+                else:
+                    logger.warning("Config validation failed - keeping current configuration")
+                    last_config_mtime = current_mtime  # Update mtime to avoid repeated attempts
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON in updated config file: {e}")
+                last_config_mtime = current_mtime  # Update mtime to avoid repeated attempts
+            except Exception as e:
+                logger.error(f"Error reloading config: {e}")
+                last_config_mtime = current_mtime  # Update mtime to avoid repeated attempts
         
         # Update status before check
         status_data["last_check"] = datetime.now().isoformat()
