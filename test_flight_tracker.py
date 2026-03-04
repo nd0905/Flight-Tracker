@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+from requests.exceptions import RequestException
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -175,7 +176,7 @@ class TestSearchFlights(unittest.TestCase):
         params = mock_get.call_args[1]["params"]
         self.assertEqual(params["returnDate"], "2026-12-28")
 
-    @patch("flight_tracker.requests.get", side_effect=Exception("network error"))
+    @patch("flight_tracker.requests.get", side_effect=RequestException("network error"))
     def test_returns_empty_on_error(self, _):
         self.assertEqual(self.tracker.search_flights("DEN", "ORD", "2026-12-20"), {})
 
@@ -207,7 +208,7 @@ class TestSendWebhookNotification(unittest.TestCase):
         self.assertEqual(payload["price"], 299.0)
         self.assertEqual(payload["threshold"], 400)
 
-    @patch("flight_tracker.requests.post", side_effect=Exception("timeout"))
+    @patch("flight_tracker.requests.post", side_effect=RequestException("timeout"))
     def test_handles_error_gracefully(self, _):
         # Should not raise
         self.tracker.send_webhook_notification(
