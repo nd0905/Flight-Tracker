@@ -1,6 +1,6 @@
 # Flight Price Tracker
 
-A Python-based flight price monitoring system that uses **Amadeus API** (or SerpAPI) to track flight prices and sends webhook notifications when prices drop below your specified threshold.
+A Python-based flight price monitoring system that uses **Amadeus API** to track flight prices and sends webhook notifications when prices drop below your specified threshold.
 
 > **⚠️ Note:** This project was vibe coded and likely has bugs. Use at your own discretion and please report any issues you encounter!
 
@@ -305,10 +305,6 @@ export WEBHOOK_URL="your_webhook"
 python flight_tracker.py
 ```
 
-## SerpAPI Version (Legacy)
-
-The original SerpAPI version is still available as `flight_tracker_serpapi.py`. It uses Google Flights data via SerpAPI but has a more limited free tier (250 calls/month).
-
 ## Notes
 
 - Amadeus test environment may have limited data; use production credentials for real bookings
@@ -317,15 +313,6 @@ The original SerpAPI version is still available as `flight_tracker_serpapi.py`. 
 - Prices are in USD
 - The container runs continuously and checks at the specified interval
 - Use environment variables to override config.json values for sensitive data
-
-## API Comparison
-
-| Feature | Amadeus (Current) | SerpAPI (Legacy) |
-|---------|------------------|------------------|
-| Free tier | 2,000 calls/month | 250 calls/month |
-| Data source | Official airlines | Google Flights |
-| Price accuracy | High | Very High |
-| Setup complexity | Medium | Easy |
 
 ## License
 

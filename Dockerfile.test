@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt pytest
+
+# Copy application and test files
+COPY flight_tracker.py .
+COPY test_flight_tracker.py .
+
+CMD ["python", "-m", "pytest", "test_flight_tracker.py", "-v"]

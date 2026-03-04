@@ -491,10 +491,74 @@ class FlightTracker:
         return found_deal
 
 
+def get_config_mtime(config_path: str) -> Optional[float]:
+    """Get the modification time of the config file"""
+    try:
+        return os.path.getmtime(config_path)
+    except OSError:
+        return None
+
+
+def validate_config_change(old_config: Dict, new_config: Dict) -> bool:
+    """Validate that a new config has the required fields"""
+    env_overrides = {
+        "amadeus_api_key": "AMADEUS_API_KEY",
+        "amadeus_api_secret": "AMADEUS_API_SECRET",
+        "webhook_url": "WEBHOOK_URL",
+    }
+    for key in ("amadeus_api_key", "amadeus_api_secret", "webhook_url"):
+        if not new_config.get(key) and not os.getenv(env_overrides[key]):
+            logger.warning(f"Config validation: missing required key '{key}'")
+            return False
+    if not new_config.get("routes"):
+        logger.warning("Config validation: no routes defined")
+        return False
+    return True
+
+
+def calculate_total_api_requests(routes: List[Dict]) -> Dict:
+    """Calculate estimated API requests per check cycle"""
+    total = 0
+    per_route = []
+    for route in routes:
+        outbound_dates = route.get("outbound_dates", [])
+        return_dates = route.get("return_dates", [])
+        combos = max(len(outbound_dates) * max(len(return_dates), 1), 1)
+        per_route.append({
+            "route": f"{route.get('departure')} → {route.get('destination')}",
+            "requests": combos,
+        })
+        total += combos
+    return {"total_per_check": total, "per_route": per_route}
+
+
 def load_config(config_path: str = "config.json") -> Dict:
     """Load configuration from JSON file"""
     with open(config_path, 'r') as f:
         return json.load(f)
+
+
+def config_watcher(
+    config_path: str,
+    stop_event: threading.Event,
+    config_changed_event: threading.Event,
+    poll_interval: int = 5,
+):
+    """Dedicated thread that polls the config file for changes.
+
+    When a modification is detected it sets *config_changed_event* so the
+    main loop can restart the tracker client immediately rather than waiting
+    for the next scheduled check.
+    """
+    last_mtime = get_config_mtime(config_path)
+    logger.info(f"Config watcher started — monitoring '{config_path}' every {poll_interval}s")
+    while not stop_event.wait(timeout=poll_interval):
+        current_mtime = get_config_mtime(config_path)
+        if current_mtime != last_mtime:
+            logger.info("Config watcher: change detected, signalling client restart")
+            last_mtime = current_mtime
+            config_changed_event.set()
+    logger.info("Config watcher stopped")
 
 
 def main():
@@ -590,109 +654,112 @@ def main():
     
     # Check interval in seconds
     check_interval_seconds = check_interval * 3600
-    
-    # Track config file modification time
-    last_config_mtime = get_config_mtime(config_path)
-    
-    while True:
-        logger.info("=" * 60)
-        logger.info("Starting new check cycle")
-        
-        # Check for config file changes
-        current_mtime = get_config_mtime(config_path)
-        if current_mtime != last_config_mtime:
-            logger.info("Configuration file changed, reloading...")
-            try:
-                new_config = load_config(config_path)
-                
-                # Validate the config change
-                if validate_config_change(config, new_config):
-                    # Update routes
-                    old_routes = routes
-                    routes = new_config.get("routes", [])
-                    
-                    # Update check interval
-                    old_interval = check_interval
-                    check_interval = new_config.get("check_interval_hours", 6)
-                    check_interval_seconds = check_interval * 3600
-                    
-                    # Update webhook URL if changed
-                    new_webhook = os.getenv("WEBHOOK_URL", new_config.get("webhook_url"))
-                    if new_webhook != webhook_url:
-                        webhook_url = new_webhook
+
+    # Events used to coordinate with the config-watcher thread
+    stop_event = threading.Event()
+    config_changed_event = threading.Event()
+
+    # Start dedicated config-watcher thread
+    watcher_thread = threading.Thread(
+        target=config_watcher,
+        args=(config_path, stop_event, config_changed_event),
+        daemon=True,
+        name="config-watcher",
+    )
+    watcher_thread.start()
+
+    try:
+        while True:
+            logger.info("=" * 60)
+            logger.info("Starting new check cycle")
+
+            # Update status before check
+            status_data["last_check"] = datetime.now().isoformat()
+            status_data["next_check"] = (datetime.now() + timedelta(hours=check_interval)).isoformat()
+
+            for route in routes:
+                try:
+                    tracker.check_flight_route(route)
+                except Exception as e:
+                    logger.error(f"Error checking route {route.get('departure')} → {route.get('destination')}: {e}")
+
+            logger.info(f"Check cycle complete. Sleeping for {check_interval} hours (or until config changes)")
+
+            # Block until either the interval elapses or the config watcher fires
+            config_changed_event.wait(timeout=check_interval_seconds)
+
+            if config_changed_event.is_set():
+                config_changed_event.clear()
+                logger.info("Config change detected — restarting client...")
+                try:
+                    new_config = load_config(config_path)
+
+                    if validate_config_change(config, new_config):
+                        old_routes = routes
+                        routes = new_config.get("routes", [])
+
+                        old_interval = check_interval
+                        check_interval = new_config.get("check_interval_hours", 6)
+                        check_interval_seconds = check_interval * 3600
+
+                        # Re-create tracker if webhook URL changed
+                        new_webhook = os.getenv("WEBHOOK_URL", new_config.get("webhook_url"))
+                        if new_webhook != webhook_url:
+                            webhook_url = new_webhook
                         tracker = FlightTracker(auth, webhook_url)
-                    
-                    # Recalculate API requests
-                    api_requests = calculate_total_api_requests(routes)
-                    
-                    # Update status data
-                    status_data["routes_tracked"] = len(routes)
-                    status_data["routes"] = [
-                        {
-                            "departure": r.get("departure"),
-                            "destination": r.get("destination"),
-                            "description": r.get("description", "")
-                        }
-                        for r in routes
-                    ]
-                    status_data["check_interval_hours"] = check_interval
-                    status_data["api_requests_per_check"] = api_requests["total_per_check"]
-                    status_data["api_requests_per_route"] = api_requests["per_route"]
-                    status_data["estimated_monthly_requests"] = api_requests["total_per_check"] * (720 // check_interval)
-                    status_data["config_last_reloaded"] = datetime.now().isoformat()
-                    
-                    # Update stored config
-                    config = new_config
-                    last_config_mtime = current_mtime
-                    
-                    logger.info(f"Configuration reloaded successfully")
-                    logger.info(f"Routes: {len(old_routes)} → {len(routes)}")
-                    if old_interval != check_interval:
-                        logger.info(f"Check interval: {old_interval}h → {check_interval}h")
-                    
-                    # Send notification about config reload
-                    try:
-                        reload_payload = {
-                            "type": "config_reload",
-                            "status": "success",
-                            "message": "Configuration reloaded successfully",
-                            "routes_tracked": len(routes),
-                            "check_interval_hours": check_interval,
-                            "api_requests_per_check": api_requests["total_per_check"],
-                            "timestamp": datetime.now().isoformat()
-                        }
-                        response = requests.post(
-                            webhook_url,
-                            json=reload_payload,
-                            headers={"Content-Type": "application/json"},
-                            timeout=10
-                        )
-                        response.raise_for_status()
-                    except requests.exceptions.RequestException as e:
-                        logger.error(f"Error sending config reload notification: {e}")
-                else:
-                    logger.warning("Config validation failed - keeping current configuration")
-                    last_config_mtime = current_mtime  # Update mtime to avoid repeated attempts
-                    
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON in updated config file: {e}")
-                last_config_mtime = current_mtime  # Update mtime to avoid repeated attempts
-            except Exception as e:
-                logger.error(f"Error reloading config: {e}")
-                last_config_mtime = current_mtime  # Update mtime to avoid repeated attempts
-        
-        # Update status before check
-        status_data["last_check"] = datetime.now().isoformat()
-        status_data["next_check"] = (datetime.now() + timedelta(hours=check_interval)).isoformat()
-        
-        for route in routes:
-            try:
-                tracker.check_flight_route(route)
-            except Exception as e:
-                logger.error(f"Error checking route {route.get('departure')} → {route.get('destination')}: {e}")
-        
-        logger.info(f"Check cycle complete. Sleeping for {check_interval} hours")
-        time.sleep(check_interval_seconds)
+
+                        api_requests = calculate_total_api_requests(routes)
+
+                        status_data["routes_tracked"] = len(routes)
+                        status_data["routes"] = [
+                            {
+                                "departure": r.get("departure"),
+                                "destination": r.get("destination"),
+                                "description": r.get("description", ""),
+                            }
+                            for r in routes
+                        ]
+                        status_data["check_interval_hours"] = check_interval
+                        status_data["api_requests_per_check"] = api_requests["total_per_check"]
+                        status_data["api_requests_per_route"] = api_requests["per_route"]
+                        status_data["estimated_monthly_requests"] = api_requests["total_per_check"] * (720 // check_interval)
+                        status_data["config_last_reloaded"] = datetime.now().isoformat()
+
+                        config = new_config
+
+                        logger.info(f"Client restarted successfully")
+                        logger.info(f"Routes: {len(old_routes)} → {len(routes)}")
+                        if old_interval != check_interval:
+                            logger.info(f"Check interval: {old_interval}h → {check_interval}h")
+
+                        try:
+                            reload_payload = {
+                                "type": "config_reload",
+                                "status": "success",
+                                "message": "Configuration reloaded and client restarted",
+                                "routes_tracked": len(routes),
+                                "check_interval_hours": check_interval,
+                                "api_requests_per_check": api_requests["total_per_check"],
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                            response = requests.post(
+                                webhook_url,
+                                json=reload_payload,
+                                headers={"Content-Type": "application/json"},
+                                timeout=10,
+                            )
+                            response.raise_for_status()
+                        except requests.exceptions.RequestException as e:
+                            logger.error(f"Error sending config reload notification: {e}")
+                    else:
+                        logger.warning("Config validation failed — keeping current configuration")
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON in updated config file: {e}")
+                except Exception as e:
+                    logger.error(f"Error reloading config: {e}")
+    finally:
+        stop_event.set()
 
 
 if __name__ == "__main__":
