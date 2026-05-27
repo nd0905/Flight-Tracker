@@ -220,14 +220,21 @@ curl http://localhost:8080/status
 curl http://localhost:8080/flights
 ```
 
+### Browse the flight calendar:
+Open in a browser:
+```
+http://localhost:8080/calendar
+```
+
 For detailed API documentation, see [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
 
 ## API Endpoints
 
-The Flight Tracker includes a built-in web server with two endpoints:
+The Flight Tracker includes a built-in web server with the following endpoints:
 
 - **`GET /status`** - Service status, tracked routes, and check schedule
 - **`GET /flights`** - All flight prices found in the last check (updated every check cycle)
+- **`GET /calendar`** - Browsable HTML calendar showing destinations and price ranges per date
 
 See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for complete details on the JSON structure and usage examples.
 
