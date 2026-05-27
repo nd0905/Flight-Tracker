@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-05-27
+
+### Fixed
+- Calendar layout: months now wrap into rows instead of stretching in a single line
+- Calendar day cells expand on hover to show full content instead of truncating
+- Added trip length (day range) display to calendar entries
+
+### Added
+- Auto-tag workflow: merging a PR with a VERSION bump automatically creates a git tag and triggers a release
+
 ## [1.1.0] - 2026-05-27
 
 ### Added

@@ -49,14 +49,21 @@ def build_calendar_data() -> Dict[str, List[Dict]]:
         departure = route.get("departure", "")
         destination = route.get("destination", "")
 
-        date_buckets: Dict[str, List[float]] = {}
+        # Group flights by outbound_date, collecting prices and trip_days
+        date_buckets: Dict[str, Dict] = {}
         for flight in route.get("flights", []):
             date = flight.get("outbound_date")
             if not date:
                 continue
-            date_buckets.setdefault(date, []).append(flight["price"])
+            if date not in date_buckets:
+                date_buckets[date] = {"prices": [], "trip_days": set()}
+            date_buckets[date]["prices"].append(flight["price"])
+            if flight.get("trip_days"):
+                date_buckets[date]["trip_days"].add(flight["trip_days"])
 
-        for date, prices in date_buckets.items():
+        for date, bucket in date_buckets.items():
+            prices = bucket["prices"]
+            trip_days = sorted(bucket["trip_days"])
             entry = {
                 "departure": departure,
                 "destination": destination,
@@ -64,6 +71,9 @@ def build_calendar_data() -> Dict[str, List[Dict]]:
                 "max_price": max(prices),
                 "flights_count": len(prices),
             }
+            if trip_days:
+                entry["min_days"] = trip_days[0]
+                entry["max_days"] = trip_days[-1]
             calendar.setdefault(date, []).append(entry)
 
     return calendar
@@ -105,25 +115,33 @@ def build_calendar_html() -> str:
 <title>Flight Tracker Calendar</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 1.5rem; }
   h1 { text-align: center; margin-bottom: 0.5rem; font-size: 1.8rem; color: #f8fafc; }
   .subtitle { text-align: center; color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
-  .calendar-grid { display: flex; flex-wrap: wrap; gap: 2rem; justify-content: center; }
-  .month { background: #1e293b; border-radius: 12px; padding: 1.5rem; min-width: 320px; max-width: 380px; flex: 1; }
+  .calendar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 2rem; justify-items: center; }
+  .month { background: #1e293b; border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 620px; }
   .month-title { text-align: center; font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem; color: #f1f5f9; }
   .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 0.75rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 600; }
-  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-  .day { min-height: 70px; padding: 4px; border-radius: 6px; font-size: 0.75rem; position: relative; background: #0f172a; }
-  .day.empty { background: transparent; }
+  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .day { min-height: 80px; padding: 5px; border-radius: 6px; font-size: 0.75rem; position: relative; background: #0f172a; overflow: hidden; }
+  .day.empty { background: transparent; min-height: 0; }
   .day.has-flights { background: #1a2744; border: 1px solid #2563eb33; cursor: pointer; transition: all 0.2s; }
-  .day.has-flights:hover { background: #1e3a5f; border-color: #3b82f6; transform: scale(1.02); }
-  .day-number { font-weight: 600; color: #94a3b8; font-size: 0.8rem; margin-bottom: 2px; }
+  .day.has-flights:hover { background: #1e3a5f; border-color: #3b82f6; transform: scale(1.03); z-index: 2; overflow: visible; }
+  .day-number { font-weight: 600; color: #94a3b8; font-size: 0.8rem; margin-bottom: 3px; }
   .day.has-flights .day-number { color: #e2e8f0; }
   .day.today .day-number { color: #3b82f6; font-weight: 700; }
-  .flight-tag { background: #2563eb22; border: 1px solid #2563eb55; border-radius: 3px; padding: 1px 4px; margin-top: 2px; font-size: 0.65rem; color: #93c5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .flight-tag { background: #2563eb22; border: 1px solid #2563eb55; border-radius: 3px; padding: 2px 4px; margin-top: 2px; font-size: 0.65rem; color: #93c5fd; display: block; line-height: 1.3; }
+  .flight-tag .route { font-weight: 600; }
   .flight-tag .price { color: #4ade80; font-weight: 600; }
+  .flight-tag .days { color: #a78bfa; font-size: 0.6rem; }
   .legend { text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem; }
   .no-data { text-align: center; color: #64748b; padding: 4rem 2rem; font-size: 1.1rem; }
+  @media (max-width: 600px) {
+    .calendar-grid { grid-template-columns: 1fr; }
+    .month { padding: 1rem; }
+    .day { min-height: 60px; padding: 3px; }
+    .flight-tag { font-size: 0.6rem; }
+  }
 </style>
 </head>
 <body>
@@ -149,7 +167,6 @@ def build_calendar_html() -> str:
             html_parts.append('<div class="days">')
 
             first_weekday, num_days = cal.monthrange(year, month)
-            # Empty cells before first day
             for _ in range(first_weekday):
                 html_parts.append('<div class="day empty"></div>')
 
@@ -165,7 +182,7 @@ def build_calendar_html() -> str:
                 html_parts.append(f'<div class="{classes}">')
                 html_parts.append(f'<div class="day-number">{day}</div>')
 
-                for entry in entries[:3]:  # Show up to 3 routes per day
+                for entry in entries[:3]:
                     dest = entry["destination"]
                     min_p = entry["min_price"]
                     max_p = entry["max_price"]
@@ -173,9 +190,19 @@ def build_calendar_html() -> str:
                         price_str = f"${min_p:.0f}"
                     else:
                         price_str = f"${min_p:.0f}-${max_p:.0f}"
+
+                    # Trip length display
+                    days_str = ""
+                    if "min_days" in entry:
+                        if entry["min_days"] == entry["max_days"]:
+                            days_str = f' <span class="days">{entry["min_days"]}d</span>'
+                        else:
+                            days_str = f' <span class="days">{entry["min_days"]}-{entry["max_days"]}d</span>'
+
                     html_parts.append(
-                        f'<span class="flight-tag">{entry["departure"]}→{dest} '
-                        f'<span class="price">{price_str}</span></span>'
+                        f'<span class="flight-tag">'
+                        f'<span class="route">{entry["departure"]}→{dest}</span> '
+                        f'<span class="price">{price_str}</span>{days_str}</span>'
                     )
                 if len(entries) > 3:
                     html_parts.append(f'<span class="flight-tag">+{len(entries) - 3} more</span>')
@@ -186,7 +213,7 @@ def build_calendar_html() -> str:
 
         html_parts.append('</div>')
 
-    html_parts.append('<div class="legend">Dates with flight data are highlighted. Prices shown are per-route totals for all passengers.</div>')
+    html_parts.append('<div class="legend">Prices are totals for all passengers. Trip length shown in purple.</div>')
     html_parts.append('</body></html>')
 
     return "".join(html_parts)

@@ -246,7 +246,10 @@ The current version lives in the `VERSION` file at the repository root (plain te
 
 1. Update `VERSION` file with the new version number
 2. Move `## [Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading
-3. Commit and tag: `git tag vX.Y.Z`
+3. Merge the PR — the `auto-tag.yml` workflow automatically detects the VERSION change, creates a `vX.Y.Z` tag, and pushes it
+4. The tag push triggers `release.yml` which runs tests, builds/pushes the Docker image, and creates a GitHub Release
+
+**Important:** Always bump `VERSION` and update `CHANGELOG.md` in the same PR as the code change. The automation handles tagging and releasing.
 
 
 ## Notes for Copilot Sessions
