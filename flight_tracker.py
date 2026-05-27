@@ -41,6 +41,157 @@ flights_data = {
 }
 
 
+def build_calendar_data() -> Dict[str, List[Dict]]:
+    """Build calendar view from flights_data, grouped by outbound date."""
+    calendar: Dict[str, List[Dict]] = {}
+
+    for route in flights_data.get("routes", []):
+        departure = route.get("departure", "")
+        destination = route.get("destination", "")
+
+        date_buckets: Dict[str, List[float]] = {}
+        for flight in route.get("flights", []):
+            date = flight.get("outbound_date")
+            if not date:
+                continue
+            date_buckets.setdefault(date, []).append(flight["price"])
+
+        for date, prices in date_buckets.items():
+            entry = {
+                "departure": departure,
+                "destination": destination,
+                "min_price": min(prices),
+                "max_price": max(prices),
+                "flights_count": len(prices),
+            }
+            calendar.setdefault(date, []).append(entry)
+
+    return calendar
+
+
+def build_calendar_html() -> str:
+    """Render a browsable HTML calendar with flight data per date."""
+    import calendar as cal
+
+    data = build_calendar_data()
+
+    # Determine which months to show based on available data
+    if data:
+        all_dates = sorted(data.keys())
+        first = datetime.strptime(all_dates[0], "%Y-%m-%d")
+        last = datetime.strptime(all_dates[-1], "%Y-%m-%d")
+    else:
+        first = datetime.now()
+        last = first
+
+    months = []
+    current = first.replace(day=1)
+    while current <= last:
+        months.append((current.year, current.month))
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+
+    if not months:
+        months = [(datetime.now().year, datetime.now().month)]
+
+    # Build HTML
+    html_parts = ["""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight Tracker Calendar</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  h1 { text-align: center; margin-bottom: 0.5rem; font-size: 1.8rem; color: #f8fafc; }
+  .subtitle { text-align: center; color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
+  .calendar-grid { display: flex; flex-wrap: wrap; gap: 2rem; justify-content: center; }
+  .month { background: #1e293b; border-radius: 12px; padding: 1.5rem; min-width: 320px; max-width: 380px; flex: 1; }
+  .month-title { text-align: center; font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem; color: #f1f5f9; }
+  .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 0.75rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 600; }
+  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .day { min-height: 70px; padding: 4px; border-radius: 6px; font-size: 0.75rem; position: relative; background: #0f172a; }
+  .day.empty { background: transparent; }
+  .day.has-flights { background: #1a2744; border: 1px solid #2563eb33; cursor: pointer; transition: all 0.2s; }
+  .day.has-flights:hover { background: #1e3a5f; border-color: #3b82f6; transform: scale(1.02); }
+  .day-number { font-weight: 600; color: #94a3b8; font-size: 0.8rem; margin-bottom: 2px; }
+  .day.has-flights .day-number { color: #e2e8f0; }
+  .day.today .day-number { color: #3b82f6; font-weight: 700; }
+  .flight-tag { background: #2563eb22; border: 1px solid #2563eb55; border-radius: 3px; padding: 1px 4px; margin-top: 2px; font-size: 0.65rem; color: #93c5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .flight-tag .price { color: #4ade80; font-weight: 600; }
+  .legend { text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem; }
+  .no-data { text-align: center; color: #64748b; padding: 4rem 2rem; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+<h1>✈️ Flight Calendar</h1>
+"""]
+
+    last_updated = flights_data.get("last_updated")
+    if last_updated:
+        html_parts.append(f'<p class="subtitle">Last updated: {last_updated}</p>')
+    else:
+        html_parts.append('<p class="subtitle">No flight data yet — waiting for first check cycle</p>')
+
+    if not data:
+        html_parts.append('<div class="no-data">No flight data available yet.<br>Data will appear after the first check cycle completes.</div>')
+    else:
+        html_parts.append('<div class="calendar-grid">')
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        for year, month in months:
+            month_name = datetime(year, month, 1).strftime("%B %Y")
+            html_parts.append(f'<div class="month"><div class="month-title">{month_name}</div>')
+            html_parts.append('<div class="weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>')
+            html_parts.append('<div class="days">')
+
+            first_weekday, num_days = cal.monthrange(year, month)
+            # Empty cells before first day
+            for _ in range(first_weekday):
+                html_parts.append('<div class="day empty"></div>')
+
+            for day in range(1, num_days + 1):
+                date_str = f"{year}-{month:02d}-{day:02d}"
+                entries = data.get(date_str, [])
+                classes = "day"
+                if entries:
+                    classes += " has-flights"
+                if date_str == today_str:
+                    classes += " today"
+
+                html_parts.append(f'<div class="{classes}">')
+                html_parts.append(f'<div class="day-number">{day}</div>')
+
+                for entry in entries[:3]:  # Show up to 3 routes per day
+                    dest = entry["destination"]
+                    min_p = entry["min_price"]
+                    max_p = entry["max_price"]
+                    if min_p == max_p:
+                        price_str = f"${min_p:.0f}"
+                    else:
+                        price_str = f"${min_p:.0f}-${max_p:.0f}"
+                    html_parts.append(
+                        f'<span class="flight-tag">{entry["departure"]}→{dest} '
+                        f'<span class="price">{price_str}</span></span>'
+                    )
+                if len(entries) > 3:
+                    html_parts.append(f'<span class="flight-tag">+{len(entries) - 3} more</span>')
+
+                html_parts.append('</div>')
+
+            html_parts.append('</div></div>')
+
+        html_parts.append('</div>')
+
+    html_parts.append('<div class="legend">Dates with flight data are highlighted. Prices shown are per-route totals for all passengers.</div>')
+    html_parts.append('</body></html>')
+
+    return "".join(html_parts)
+
+
 class StatusHandler(BaseHTTPRequestHandler):
     """Simple HTTP handler to serve status JSON"""
     
@@ -58,6 +209,12 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps(flights_data, indent=2).encode())
+        elif self.path == '/calendar':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(build_calendar_html().encode())
         else:
             self.send_response(404)
             self.end_headers()
