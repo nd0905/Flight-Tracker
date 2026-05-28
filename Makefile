@@ -1,14 +1,17 @@
 IMAGE_NAME   ?= flight-tracker
 CONFIG_FILE  ?= config.json
 PORT         ?= 8080
+VENV         ?= .venv
+PYTHON       := $(VENV)/bin/python
+PIP          := $(VENV)/bin/pip
 
-.PHONY: help install test test-docker run run-docker stop logs build build-test
+.PHONY: help install test test-docker run run-docker stop logs build build-test clean
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
-	@echo "  install       Install Python dependencies locally"
-	@echo "  test          Run tests locally"
+	@echo "  install       Create venv and install dependencies"
+	@echo "  test          Run tests locally (auto-creates venv if needed)"
 	@echo "  test-docker   Run tests inside Docker"
 	@echo "  build         Build the production Docker image"
 	@echo "  build-test    Build the test Docker image"
@@ -16,12 +19,17 @@ help:
 	@echo "  run-docker    Run in Docker using $(CONFIG_FILE)"
 	@echo "  stop          Stop and remove the running container"
 	@echo "  logs          Tail logs from the running container"
+	@echo "  clean         Remove venv and cached files"
 
-install:
-	pip install -r requirements.txt pytest
+$(VENV)/bin/activate:
+	python3 -m venv $(VENV)
+	$(PIP) install --quiet --upgrade pip
 
-test:
-	python -m pytest test_flight_tracker.py -v
+install: $(VENV)/bin/activate
+	$(PIP) install --quiet -r requirements.txt pytest
+
+test: install
+	$(PYTHON) -m pytest test_flight_tracker.py -v
 
 test-docker: build-test
 	docker run --rm flight-tracker-test
@@ -32,8 +40,8 @@ build:
 build-test:
 	docker build -f Dockerfile.test -t flight-tracker-test .
 
-run:
-	python flight_tracker.py
+run: install
+	$(PYTHON) flight_tracker.py
 
 run-docker: build
 	docker run -d \
@@ -48,3 +56,6 @@ stop:
 
 logs:
 	docker logs -f $(IMAGE_NAME)
+
+clean:
+	rm -rf $(VENV) __pycache__ .pytest_cache

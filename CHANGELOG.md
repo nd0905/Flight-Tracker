@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.4] - 2026-05-28
+
+### Changed
+- Makefile now uses a Python virtual environment (`.venv`) for all local targets (`install`, `test`, `run`)
+- `make test` auto-creates the venv and installs deps if not present
+- Added `make clean` target to remove venv and caches
+- Added `.venv` to `.gitignore`
+
+## [1.1.3] - 2026-05-28
+
+### Fixed
+- Division-by-zero in config reload when `check_interval_hours` is 0
+- Replaced broken `test_calculate_total_api_requests` test that referenced nonexistent keys
+
+### Added
+- Tests for `calculate_total_api_requests` covering single date, date range, trip length with flex, and multiple routes
+- Tests for `build_calendar_data` (date grouping, trip days range, multiple routes)
+- Tests for `build_calendar_html` (HTML output, trip days display, empty state)
+- Tests for `/calendar` endpoint (status code, content type)
+- Testing requirements section in copilot instructions
+
+## [1.1.2] - 2026-05-28
+
+### Fixed
+- `/status` endpoint now includes `api_requests_per_check`, `api_requests_per_route`, and `estimated_monthly_requests` from startup (previously only appeared after config reload)
+- `calculate_total_api_requests()` now correctly computes date combinations from route config instead of looking for nonexistent `outbound_dates`/`return_dates` keys
+
 ## [1.1.1] - 2026-05-27
 
 ### Fixed
