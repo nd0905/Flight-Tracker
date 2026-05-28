@@ -85,26 +85,16 @@ def build_calendar_html() -> str:
 
     data = build_calendar_data()
 
-    # Determine which months to show based on available data
-    if data:
-        all_dates = sorted(data.keys())
-        first = datetime.strptime(all_dates[0], "%Y-%m-%d")
-        last = datetime.strptime(all_dates[-1], "%Y-%m-%d")
-    else:
-        first = datetime.now()
-        last = first
-
+    # Always show 12 months from the current month
+    now = datetime.now()
     months = []
-    current = first.replace(day=1)
-    while current <= last:
+    current = now.replace(day=1)
+    for _ in range(12):
         months.append((current.year, current.month))
         if current.month == 12:
             current = current.replace(year=current.year + 1, month=1)
         else:
             current = current.replace(month=current.month + 1)
-
-    if not months:
-        months = [(datetime.now().year, datetime.now().month)]
 
     # Build HTML
     html_parts = ["""<!DOCTYPE html>
@@ -123,14 +113,15 @@ def build_calendar_html() -> str:
   .month-title { text-align: center; font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem; color: #f1f5f9; }
   .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 0.75rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 600; }
   .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-  .day { min-height: 80px; padding: 5px; border-radius: 6px; font-size: 0.75rem; position: relative; background: #0f172a; overflow: hidden; }
-  .day.empty { background: transparent; min-height: 0; }
-  .day.has-flights { background: #1a2744; border: 1px solid #2563eb33; cursor: pointer; transition: all 0.2s; }
-  .day.has-flights:hover { background: #1e3a5f; border-color: #3b82f6; transform: scale(1.03); z-index: 2; overflow: visible; }
+  .day { min-height: 80px; max-height: 80px; padding: 5px; border-radius: 6px; font-size: 0.75rem; position: relative; background: #0f172a; overflow: hidden; transition: all 0.2s; }
+  .day.empty { background: transparent; min-height: 0; max-height: none; }
+  .day.has-flights { background: #1a2744; border: 1px solid #2563eb33; cursor: pointer; }
+  .day.has-flights:hover { background: #1e3a5f; border-color: #3b82f6; transform: scale(1.05); z-index: 10; overflow: visible; max-height: none; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
   .day-number { font-weight: 600; color: #94a3b8; font-size: 0.8rem; margin-bottom: 3px; }
   .day.has-flights .day-number { color: #e2e8f0; }
   .day.today .day-number { color: #3b82f6; font-weight: 700; }
-  .flight-tag { background: #2563eb22; border: 1px solid #2563eb55; border-radius: 3px; padding: 2px 4px; margin-top: 2px; font-size: 0.65rem; color: #93c5fd; display: block; line-height: 1.3; }
+  .flight-tag { background: #2563eb22; border: 1px solid #2563eb55; border-radius: 3px; padding: 2px 4px; margin-top: 2px; font-size: 0.65rem; color: #93c5fd; display: block; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .day:hover .flight-tag { white-space: normal; overflow: visible; text-overflow: unset; }
   .flight-tag .route { font-weight: 600; }
   .flight-tag .price { color: #4ade80; font-weight: 600; }
   .flight-tag .days { color: #a78bfa; font-size: 0.6rem; }
@@ -156,64 +147,64 @@ def build_calendar_html() -> str:
 
     if not data:
         html_parts.append('<div class="no-data">No flight data available yet.<br>Data will appear after the first check cycle completes.</div>')
-    else:
-        html_parts.append('<div class="calendar-grid">')
-        today_str = datetime.now().strftime("%Y-%m-%d")
 
-        for year, month in months:
-            month_name = datetime(year, month, 1).strftime("%B %Y")
-            html_parts.append(f'<div class="month"><div class="month-title">{month_name}</div>')
-            html_parts.append('<div class="weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>')
-            html_parts.append('<div class="days">')
+    html_parts.append('<div class="calendar-grid">')
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
-            first_weekday, num_days = cal.monthrange(year, month)
-            for _ in range(first_weekday):
-                html_parts.append('<div class="day empty"></div>')
+    for year, month in months:
+        month_name = datetime(year, month, 1).strftime("%B %Y")
+        html_parts.append(f'<div class="month"><div class="month-title">{month_name}</div>')
+        html_parts.append('<div class="weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>')
+        html_parts.append('<div class="days">')
 
-            for day in range(1, num_days + 1):
-                date_str = f"{year}-{month:02d}-{day:02d}"
-                entries = data.get(date_str, [])
-                classes = "day"
-                if entries:
-                    classes += " has-flights"
-                if date_str == today_str:
-                    classes += " today"
+        first_weekday, num_days = cal.monthrange(year, month)
+        for _ in range(first_weekday):
+            html_parts.append('<div class="day empty"></div>')
 
-                html_parts.append(f'<div class="{classes}">')
-                html_parts.append(f'<div class="day-number">{day}</div>')
+        for day in range(1, num_days + 1):
+            date_str = f"{year}-{month:02d}-{day:02d}"
+            entries = data.get(date_str, [])
+            classes = "day"
+            if entries:
+                classes += " has-flights"
+            if date_str == today_str:
+                classes += " today"
 
-                for entry in entries[:3]:
-                    dest = entry["destination"]
-                    min_p = entry["min_price"]
-                    max_p = entry["max_price"]
-                    if min_p == max_p:
-                        price_str = f"${min_p:.0f}"
+            html_parts.append(f'<div class="{classes}">')
+            html_parts.append(f'<div class="day-number">{day}</div>')
+
+            for entry in entries[:3]:
+                dest = entry["destination"]
+                min_p = entry["min_price"]
+                max_p = entry["max_price"]
+                if min_p == max_p:
+                    price_str = f"${min_p:.0f}"
+                else:
+                    price_str = f"${min_p:.0f}-${max_p:.0f}"
+
+                # Trip length display
+                days_str = ""
+                if "min_days" in entry:
+                    if entry["min_days"] == entry["max_days"]:
+                        days_str = f' <span class="days">{entry["min_days"]}d</span>'
                     else:
-                        price_str = f"${min_p:.0f}-${max_p:.0f}"
+                        days_str = f' <span class="days">{entry["min_days"]}-{entry["max_days"]}d</span>'
 
-                    # Trip length display
-                    days_str = ""
-                    if "min_days" in entry:
-                        if entry["min_days"] == entry["max_days"]:
-                            days_str = f' <span class="days">{entry["min_days"]}d</span>'
-                        else:
-                            days_str = f' <span class="days">{entry["min_days"]}-{entry["max_days"]}d</span>'
+                html_parts.append(
+                    f'<span class="flight-tag">'
+                    f'<span class="route">{entry["departure"]}→{dest}</span> '
+                    f'<span class="price">{price_str}</span>{days_str}</span>'
+                )
+            if len(entries) > 3:
+                html_parts.append(f'<span class="flight-tag">+{len(entries) - 3} more</span>')
 
-                    html_parts.append(
-                        f'<span class="flight-tag">'
-                        f'<span class="route">{entry["departure"]}→{dest}</span> '
-                        f'<span class="price">{price_str}</span>{days_str}</span>'
-                    )
-                if len(entries) > 3:
-                    html_parts.append(f'<span class="flight-tag">+{len(entries) - 3} more</span>')
+            html_parts.append('</div>')
 
-                html_parts.append('</div>')
+        html_parts.append('</div></div>')
 
-            html_parts.append('</div></div>')
+    html_parts.append('</div>')
 
-        html_parts.append('</div>')
-
-    html_parts.append('<div class="legend">Prices are totals for all passengers. Trip length shown in purple.</div>')
+    html_parts.append('<div class="legend">Prices are totals for all passengers. Trip length shown in purple. Hover over a day to see full details.</div>')
     html_parts.append('</body></html>')
 
     return "".join(html_parts)
@@ -444,12 +435,18 @@ class FlightTracker:
         
         # Check if dates are more than 1 year in advance
         one_year_from_now = datetime.now().date() + timedelta(days=365)
+        today = datetime.now().date()
         
         # Handle date ranges with trip length
         if "date_range" in route:
             start_date = datetime.strptime(route["date_range"]["start"], "%Y-%m-%d")
             end_date = datetime.strptime(route["date_range"]["end"], "%Y-%m-%d")
             
+            # Check if entire date range is in the past
+            if end_date.date() < today:
+                logger.warning(f"Route {departure} → {destination}: Date range ends {end_date.date()}, already in the past. Skipping.")
+                return False
+
             # Check if start date is too far in future
             if start_date.date() > one_year_from_now:
                 logger.warning(f"Route {departure} → {destination}: Start date {start_date.date()} is more than 1 year away. Skipping.")
@@ -464,12 +461,14 @@ class FlightTracker:
                 date_combinations = []
                 current = start_date
                 while current <= end_date:
+                    # Skip if this departure date is in the past
+                    if current.date() < today:
+                        current += timedelta(days=1)
+                        continue
                     # Skip if this departure date is too far in future
                     if current.date() > one_year_from_now:
                         current += timedelta(days=1)
                         continue
-                    
-                    # Calculate return dates based on trip length and flexibility
                     min_trip = trip_length - trip_flex
                     max_trip = trip_length + trip_flex
                     
@@ -503,6 +502,10 @@ class FlightTracker:
                 date_combinations = []
                 current = start_date
                 while current <= end_date:
+                    # Skip if this departure date is in the past
+                    if current.date() < today:
+                        current += timedelta(days=1)
+                        continue
                     # Skip if this departure date is too far in future
                     if current.date() > one_year_from_now:
                         current += timedelta(days=1)
@@ -537,6 +540,11 @@ class FlightTracker:
             # Single date specified
             departure_date = datetime.strptime(route["date"], "%Y-%m-%d").date()
             
+            # Check if departure date is in the past
+            if departure_date < today:
+                logger.warning(f"Route {departure} → {destination}: Departure date {departure_date} is in the past. Skipping.")
+                return False
+
             # Check if departure date is too far in future
             if departure_date > one_year_from_now:
                 logger.warning(f"Route {departure} → {destination}: Departure date {departure_date} is more than 1 year away. Skipping.")

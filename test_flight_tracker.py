@@ -274,6 +274,42 @@ class TestCheckFlightRoute(unittest.TestCase):
         }
         self.assertFalse(self._tracker().check_flight_route(route, store_all_flights=False))
 
+    def test_departure_in_past_skipped(self):
+        route = {
+            "departure": "DEN", "destination": "ORD",
+            "date": (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d"),
+            "max_price": 500,
+        }
+        self.assertFalse(self._tracker().check_flight_route(route, store_all_flights=False))
+
+    def test_date_range_entirely_in_past_skipped(self):
+        past = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+        route = {
+            "departure": "DEN", "destination": "ORD",
+            "date_range": {"start": past, "end": past},
+            "trip_length_days": 7, "trip_flex_days": 0,
+            "max_price": 500,
+        }
+        self.assertFalse(self._tracker().check_flight_route(route, store_all_flights=False))
+
+    @patch("flight_tracker.time.sleep")
+    @patch("flight_tracker.requests.get")
+    def test_date_range_partially_in_past_skips_past_dates(self, mock_get, _sleep):
+        mock_get.return_value.json.return_value = _amadeus_response([_amadeus_offer(500.0)])
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        # Range spans from 2 days ago to 2 days from now — only future dates should be checked
+        start = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        end = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+        route = {
+            "departure": "DEN", "destination": "ORD",
+            "date_range": {"start": start, "end": end},
+            "max_price": 500,
+        }
+        self._tracker().check_flight_route(route, store_all_flights=False)
+        # Should only call API for today + 2 future days = 3 calls (not 5)
+        self.assertEqual(mock_get.call_count, 3)
+
     def test_date_range_more_than_one_year_away_skipped(self):
         far = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
         route = {
@@ -611,6 +647,8 @@ class TestBuildCalendarHtml(unittest.TestCase):
         self.assertIn("No flight data available", html)
 
     def test_returns_html_with_data(self):
+        future_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
+        future_month = (datetime.now() + timedelta(days=60)).strftime("%B %Y")
         ft_module.flights_data = {
             "last_updated": "2026-05-27T10:00:00",
             "routes": [{
@@ -618,18 +656,19 @@ class TestBuildCalendarHtml(unittest.TestCase):
                 "destination": "ORD",
                 "max_price": 500,
                 "flights": [
-                    {"outbound_date": "2026-12-20", "price": 300.0, "trip_days": 8},
+                    {"outbound_date": future_date, "price": 300.0, "trip_days": 8},
                 ]
             }]
         }
         html = build_calendar_html()
         self.assertIn("<!DOCTYPE html>", html)
-        self.assertIn("December 2026", html)
+        self.assertIn(future_month, html)
         self.assertIn("DEN", html)
         self.assertIn("ORD", html)
         self.assertIn("$300", html)
 
     def test_shows_trip_days(self):
+        future_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
         ft_module.flights_data = {
             "last_updated": "2026-05-27T10:00:00",
             "routes": [{
@@ -637,8 +676,8 @@ class TestBuildCalendarHtml(unittest.TestCase):
                 "destination": "PVR",
                 "max_price": 500,
                 "flights": [
-                    {"outbound_date": "2026-03-15", "price": 400.0, "trip_days": 6},
-                    {"outbound_date": "2026-03-15", "price": 500.0, "trip_days": 10},
+                    {"outbound_date": future_date, "price": 400.0, "trip_days": 6},
+                    {"outbound_date": future_date, "price": 500.0, "trip_days": 10},
                 ]
             }]
         }

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.5] - 2026-05-28
+
+### Changed
+- Calendar now always shows 12 months from the current month, regardless of flight data
+- Day cells clip overflowing text by default; full details revealed on hover with expanded card
+- Updated calendar tests to use relative future dates instead of hardcoded ones
+
+### Added
+- Past-date validation: routes with departure dates in the past are skipped with a warning
+- Date ranges partially in the past only check future dates (past dates within the range are skipped)
+
 ## [1.1.4] - 2026-05-28
 
 ### Changed
