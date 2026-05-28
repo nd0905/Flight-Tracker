@@ -5,12 +5,12 @@
 ### Install Dependencies
 ```bash
 make install
-# or directly: pip install -r requirements.txt pytest
+# Creates .venv and installs requirements + pytest
 ```
 
 ### Run Tests
 ```bash
-# Run locally
+# Run locally (auto-creates venv if needed)
 make test
 # Run within Docker container
 make test-docker
@@ -42,6 +42,9 @@ make stop
 
 # View logs
 make logs
+
+# Remove venv and caches
+make clean
 ```
 
 ## High-Level Architecture
@@ -203,6 +206,33 @@ Flight-Tracker/
 │   │   └── release.yml        # Release workflow
 │   └── dependabot.yml         # Dependency scanning
 ```
+
+## Testing Requirements
+
+Every code change must include corresponding tests. Run the full suite before considering a task done:
+
+```bash
+make test
+# or directly via venv: .venv/bin/python -m pytest test_flight_tracker.py -v
+```
+
+### Running a single test
+```bash
+.venv/bin/python -m pytest test_flight_tracker.py::TestClassName::test_method_name -v
+```
+
+### Test conventions
+- Tests live in `test_flight_tracker.py` using `unittest` + `unittest.mock`
+- Use `@patch` to mock external calls (`requests.get`, `requests.post`, `time.sleep`)
+- Use helper functions `_amadeus_offer()` and `_amadeus_response()` to build mock API data
+- Use `_near_date(offset_days)` to generate dates relative to now (avoids hardcoded dates expiring)
+- When testing functions that read global state (`flights_data`, `status_data`), save/restore in `setUp`/`tearDown`
+- Test sections are separated by `# ── Section Name ──────` comments
+
+### What to test
+- New functions or endpoints: add a dedicated test class
+- Bug fixes: add a test that would have caught the bug
+- Changed behavior: update existing tests to match new behavior
 
 ## Documentation Requirements
 

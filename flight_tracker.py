@@ -701,13 +701,26 @@ def validate_config_change(old_config: Dict, new_config: Dict) -> bool:
 
 
 def calculate_total_api_requests(routes: List[Dict]) -> Dict:
-    """Calculate estimated API requests per check cycle"""
+    """Calculate estimated API requests per check cycle based on route config."""
     total = 0
     per_route = []
     for route in routes:
-        outbound_dates = route.get("outbound_dates", [])
-        return_dates = route.get("return_dates", [])
-        combos = max(len(outbound_dates) * max(len(return_dates), 1), 1)
+        combos = 0
+        if "date_range" in route:
+            start_date = datetime.strptime(route["date_range"]["start"], "%Y-%m-%d")
+            end_date = datetime.strptime(route["date_range"]["end"], "%Y-%m-%d")
+            num_days = (end_date - start_date).days + 1
+
+            trip_length = route.get("trip_length_days")
+            if trip_length is not None:
+                trip_flex = route.get("trip_flex_days", 0)
+                num_trip_lengths = (trip_flex * 2) + 1
+                combos = num_days * num_trip_lengths
+            else:
+                combos = num_days
+        else:
+            combos = 1
+
         per_route.append({
             "route": f"{route.get('departure')} → {route.get('destination')}",
             "requests": combos,
@@ -795,6 +808,9 @@ def main():
     
     check_interval = config.get("check_interval_hours", 6)
     
+    # Calculate API usage estimates
+    api_requests = calculate_total_api_requests(routes)
+
     # Update status data
     status_data = {
         "type": "startup",
@@ -810,6 +826,9 @@ def main():
             for r in routes
         ],
         "check_interval_hours": check_interval,
+        "api_requests_per_check": api_requests["total_per_check"],
+        "api_requests_per_route": api_requests["per_route"],
+        "estimated_monthly_requests": api_requests["total_per_check"] * (720 // check_interval) if check_interval > 0 else 0,
         "last_check": None,
         "next_check": (datetime.now() + timedelta(hours=check_interval)).isoformat(),
         "timestamp": datetime.now().isoformat()
@@ -906,7 +925,7 @@ def main():
                         status_data["check_interval_hours"] = check_interval
                         status_data["api_requests_per_check"] = api_requests["total_per_check"]
                         status_data["api_requests_per_route"] = api_requests["per_route"]
-                        status_data["estimated_monthly_requests"] = api_requests["total_per_check"] * (720 // check_interval)
+                        status_data["estimated_monthly_requests"] = api_requests["total_per_check"] * (720 // check_interval) if check_interval > 0 else 0
                         status_data["config_last_reloaded"] = datetime.now().isoformat()
 
                         config = new_config

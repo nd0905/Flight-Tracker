@@ -13,6 +13,8 @@ from flight_tracker import (
     AmadeusAuth,
     FlightTracker,
     StatusHandler,
+    build_calendar_data,
+    build_calendar_html,
     calculate_total_api_requests,
     get_config_mtime,
     load_config,
@@ -447,16 +449,225 @@ class TestUtilityFunctions(unittest.TestCase):
         with patch.dict(os.environ, {"AMADEUS_API_KEY": "env-key"}):
             self.assertTrue(validate_config_change({}, cfg))
 
-    def test_calculate_total_api_requests(self):
+    def test_calculate_total_api_requests_single_date(self):
         routes = [
-            {"departure": "A", "destination": "B",
-             "outbound_dates": ["d1", "d2"], "return_dates": ["r1", "r2"]},
-            {"departure": "C", "destination": "D",
-             "outbound_dates": ["d1"], "return_dates": []},
+            {"departure": "A", "destination": "B", "date": "2026-12-20", "max_price": 500},
         ]
         result = calculate_total_api_requests(routes)
-        self.assertEqual(result["total_per_check"], 5)  # 2*2 + 1*1
+        self.assertEqual(result["total_per_check"], 1)
+        self.assertEqual(result["per_route"][0]["requests"], 1)
+
+    def test_calculate_total_api_requests_date_range_no_trip_length(self):
+        routes = [
+            {"departure": "A", "destination": "B",
+             "date_range": {"start": "2026-12-18", "end": "2026-12-22"},
+             "max_price": 500},
+        ]
+        result = calculate_total_api_requests(routes)
+        # 5 days in range
+        self.assertEqual(result["total_per_check"], 5)
+
+    def test_calculate_total_api_requests_date_range_with_trip_length(self):
+        routes = [
+            {"departure": "A", "destination": "B",
+             "date_range": {"start": "2026-12-18", "end": "2026-12-22"},
+             "trip_length_days": 8, "trip_flex_days": 2,
+             "max_price": 500},
+        ]
+        result = calculate_total_api_requests(routes)
+        # 5 days * (2*2 + 1) trip lengths = 5 * 5 = 25
+        self.assertEqual(result["total_per_check"], 25)
+
+    def test_calculate_total_api_requests_no_flex(self):
+        routes = [
+            {"departure": "A", "destination": "B",
+             "date_range": {"start": "2026-03-15", "end": "2026-03-21"},
+             "trip_length_days": 7, "trip_flex_days": 0,
+             "max_price": 500},
+        ]
+        result = calculate_total_api_requests(routes)
+        # 7 days * 1 trip length = 7
+        self.assertEqual(result["total_per_check"], 7)
+
+    def test_calculate_total_api_requests_multiple_routes(self):
+        routes = [
+            {"departure": "A", "destination": "B", "date": "2026-12-20", "max_price": 500},
+            {"departure": "C", "destination": "D",
+             "date_range": {"start": "2026-03-15", "end": "2026-03-17"},
+             "trip_length_days": 5, "trip_flex_days": 1,
+             "max_price": 500},
+        ]
+        result = calculate_total_api_requests(routes)
+        # 1 + (3 days * 3 trip lengths) = 1 + 9 = 10
+        self.assertEqual(result["total_per_check"], 10)
         self.assertEqual(len(result["per_route"]), 2)
+
+
+# ── build_calendar_data ───────────────────────────────────────────────────────
+
+class TestBuildCalendarData(unittest.TestCase):
+
+    def setUp(self):
+        self._orig_flights = ft_module.flights_data.copy()
+
+    def tearDown(self):
+        ft_module.flights_data.clear()
+        ft_module.flights_data.update(self._orig_flights)
+
+    def test_empty_flights_data(self):
+        ft_module.flights_data = {"last_updated": None, "routes": []}
+        self.assertEqual(build_calendar_data(), {})
+
+    def test_groups_by_date(self):
+        ft_module.flights_data = {
+            "last_updated": "2026-05-27T10:00:00",
+            "routes": [{
+                "departure": "DEN",
+                "destination": "ORD",
+                "max_price": 500,
+                "flights": [
+                    {"outbound_date": "2026-12-20", "price": 300.0, "trip_days": 8},
+                    {"outbound_date": "2026-12-20", "price": 450.0, "trip_days": 8},
+                    {"outbound_date": "2026-12-21", "price": 380.0, "trip_days": 7},
+                ]
+            }]
+        }
+        result = build_calendar_data()
+        self.assertIn("2026-12-20", result)
+        self.assertIn("2026-12-21", result)
+        # Dec 20 entry
+        entry = result["2026-12-20"][0]
+        self.assertEqual(entry["departure"], "DEN")
+        self.assertEqual(entry["destination"], "ORD")
+        self.assertAlmostEqual(entry["min_price"], 300.0)
+        self.assertAlmostEqual(entry["max_price"], 450.0)
+        self.assertEqual(entry["flights_count"], 2)
+
+    def test_trip_days_range(self):
+        ft_module.flights_data = {
+            "last_updated": "2026-05-27T10:00:00",
+            "routes": [{
+                "departure": "DEN",
+                "destination": "PVR",
+                "max_price": 500,
+                "flights": [
+                    {"outbound_date": "2026-03-15", "price": 400.0, "trip_days": 6},
+                    {"outbound_date": "2026-03-15", "price": 500.0, "trip_days": 8},
+                    {"outbound_date": "2026-03-15", "price": 450.0, "trip_days": 7},
+                ]
+            }]
+        }
+        result = build_calendar_data()
+        entry = result["2026-03-15"][0]
+        self.assertEqual(entry["min_days"], 6)
+        self.assertEqual(entry["max_days"], 8)
+
+    def test_no_trip_days_omits_field(self):
+        ft_module.flights_data = {
+            "last_updated": "2026-05-27T10:00:00",
+            "routes": [{
+                "departure": "LAX",
+                "destination": "JFK",
+                "max_price": 800,
+                "flights": [
+                    {"outbound_date": "2026-06-15", "price": 350.0, "trip_days": None},
+                ]
+            }]
+        }
+        result = build_calendar_data()
+        entry = result["2026-06-15"][0]
+        self.assertNotIn("min_days", entry)
+        self.assertNotIn("max_days", entry)
+
+    def test_multiple_routes_same_date(self):
+        ft_module.flights_data = {
+            "last_updated": "2026-05-27T10:00:00",
+            "routes": [
+                {"departure": "DEN", "destination": "ORD", "max_price": 500,
+                 "flights": [{"outbound_date": "2026-12-20", "price": 300.0, "trip_days": 8}]},
+                {"departure": "DEN", "destination": "PVR", "max_price": 500,
+                 "flights": [{"outbound_date": "2026-12-20", "price": 600.0, "trip_days": 7}]},
+            ]
+        }
+        result = build_calendar_data()
+        self.assertEqual(len(result["2026-12-20"]), 2)
+
+
+# ── build_calendar_html ───────────────────────────────────────────────────────
+
+class TestBuildCalendarHtml(unittest.TestCase):
+
+    def setUp(self):
+        self._orig_flights = ft_module.flights_data.copy()
+
+    def tearDown(self):
+        ft_module.flights_data.clear()
+        ft_module.flights_data.update(self._orig_flights)
+
+    def test_returns_html_with_no_data(self):
+        ft_module.flights_data = {"last_updated": None, "routes": []}
+        html = build_calendar_html()
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("No flight data available", html)
+
+    def test_returns_html_with_data(self):
+        ft_module.flights_data = {
+            "last_updated": "2026-05-27T10:00:00",
+            "routes": [{
+                "departure": "DEN",
+                "destination": "ORD",
+                "max_price": 500,
+                "flights": [
+                    {"outbound_date": "2026-12-20", "price": 300.0, "trip_days": 8},
+                ]
+            }]
+        }
+        html = build_calendar_html()
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("December 2026", html)
+        self.assertIn("DEN", html)
+        self.assertIn("ORD", html)
+        self.assertIn("$300", html)
+
+    def test_shows_trip_days(self):
+        ft_module.flights_data = {
+            "last_updated": "2026-05-27T10:00:00",
+            "routes": [{
+                "departure": "DEN",
+                "destination": "PVR",
+                "max_price": 500,
+                "flights": [
+                    {"outbound_date": "2026-03-15", "price": 400.0, "trip_days": 6},
+                    {"outbound_date": "2026-03-15", "price": 500.0, "trip_days": 10},
+                ]
+            }]
+        }
+        html = build_calendar_html()
+        self.assertIn("6-10d", html)
+
+
+# ── StatusHandler /calendar ───────────────────────────────────────────────────
+
+class TestStatusHandlerCalendar(unittest.TestCase):
+
+    def _make_handler(self, path: str):
+        handler = StatusHandler.__new__(StatusHandler)
+        handler.path = path
+        handler.wfile = MagicMock()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        return handler
+
+    def test_calendar_endpoint_returns_200(self):
+        h = self._make_handler("/calendar")
+        h.do_GET()
+        h.send_response.assert_called_with(200)
+
+    def test_calendar_returns_html_content_type(self):
+        h = self._make_handler("/calendar")
+        h.do_GET()
+        h.send_header.assert_any_call('Content-Type', 'text/html; charset=utf-8')
 
 
 if __name__ == "__main__":
