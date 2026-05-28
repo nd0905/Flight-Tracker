@@ -203,7 +203,7 @@ Flight-Tracker/
 │   ├── copilot-instructions.md  # This file
 │   ├── workflows/
 │   │   ├── test.yml           # CI test workflow
-│   │   └── release.yml        # Release workflow
+│   │   └── release.yml        # Tag + test + Docker + GitHub Release (on PR merge with VERSION bump)
 │   └── dependabot.yml         # Dependency scanning
 ```
 
@@ -276,8 +276,7 @@ The current version lives in the `VERSION` file at the repository root (plain te
 
 1. Update `VERSION` file with the new version number
 2. Move `## [Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading
-3. Merge the PR — the `auto-tag.yml` workflow automatically detects the VERSION change, creates a `vX.Y.Z` tag, and pushes it
-4. The tag push triggers `release.yml` which runs tests, builds/pushes the Docker image, and creates a GitHub Release
+3. Merge the PR — the `release.yml` workflow automatically detects the VERSION change, creates a `vX.Y.Z` tag, runs tests, builds/pushes the Docker image to GHCR, and creates a GitHub Release with auto-generated notes
 
 **Important:** Always bump `VERSION` and update `CHANGELOG.md` in the same PR as the code change. The automation handles tagging and releasing.
 
