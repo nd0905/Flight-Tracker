@@ -7,6 +7,7 @@ Monitors flight prices and sends webhook notifications when prices drop below th
 import os
 import json
 import time
+import hashlib
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -691,6 +692,19 @@ def get_config_mtime(config_path: str) -> Optional[float]:
         return None
 
 
+def get_config_hash(config_path: str) -> Optional[str]:
+    """Get a content hash of the config file.
+
+    This is more reliable than mtime in containerised environments where
+    bind-mounted files may not propagate filesystem metadata changes.
+    """
+    try:
+        with open(config_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
 def validate_config_change(old_config: Dict, new_config: Dict) -> bool:
     """Validate that a new config has the required fields"""
     env_overrides = {
@@ -754,14 +768,26 @@ def config_watcher(
     When a modification is detected it sets *config_changed_event* so the
     main loop can restart the tracker client immediately rather than waiting
     for the next scheduled check.
+
+    Uses both mtime and content hashing to detect changes reliably in
+    containerised environments where bind-mounted files may not propagate
+    mtime updates (e.g. Docker single-file mounts with atomic editor saves).
     """
     last_mtime = get_config_mtime(config_path)
+    last_hash = get_config_hash(config_path)
     logger.info(f"Config watcher started — monitoring '{config_path}' every {poll_interval}s")
     while not stop_event.wait(timeout=poll_interval):
         current_mtime = get_config_mtime(config_path)
-        if current_mtime != last_mtime:
+        changed = current_mtime != last_mtime
+        if not changed:
+            current_hash = get_config_hash(config_path)
+            if current_hash != last_hash:
+                changed = True
+                last_hash = current_hash
+        if changed:
             logger.info("Config watcher: change detected, signalling client restart")
             last_mtime = current_mtime
+            last_hash = get_config_hash(config_path)
             config_changed_event.set()
     logger.info("Config watcher stopped")
 

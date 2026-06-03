@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.6] - 2026-06-03
+
+### Fixed
+- Config hot-reload now works reliably in Docker containers by using content-hash detection as a fallback when mtime changes are not propagated (e.g. single-file bind mounts with atomic editor saves)
+- Removed `:ro` flag from Docker config mount so filesystem metadata updates propagate correctly
+
 ## [1.1.5] - 2026-05-28
 
 ### Changed
