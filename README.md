@@ -196,7 +196,7 @@ docker run -d \
   -e AMADEUS_API_SECRET="your_secret_here" \
   -e WEBHOOK_URL="your_webhook_url" \
   -p 8080:8080 \
-  -v $(pwd)/config.json:/app/config.json:ro \
+  -v $(pwd)/config.json:/app/config.json \
   --name flight-tracker \
   flight-tracker
 ```
@@ -205,7 +205,7 @@ docker run -d \
 ```bash
 docker run -d \
   -p 8080:8080 \
-  -v $(pwd)/config.json:/app/config.json:ro \
+  -v $(pwd)/config.json:/app/config.json \
   --name flight-tracker \
   flight-tracker
 ```

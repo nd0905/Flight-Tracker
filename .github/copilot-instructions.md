@@ -34,7 +34,7 @@ make run
 
 ### Run in Docker
 ```bash
-# Uses config.json mounted read-only
+# Uses config.json mounted as a volume
 make run-docker
 
 # Stop the container
@@ -251,7 +251,8 @@ When making changes to this project, always update documentation:
    ### Fixed
    - Description of bug fix
    ```
-3. **This file (`.github/copilot-instructions.md`)** — Update if the change introduces new architecture, conventions, or patterns that future sessions need to know about.
+3. **SECURITY.md** — Update if the change affects secrets handling, Docker security posture, network exposure, or introduces new security-relevant configuration options.
+4. **This file (`.github/copilot-instructions.md`)** — Update if the change introduces new architecture, conventions, or patterns that future sessions need to know about.
 
 ## Versioning
 
@@ -276,7 +277,8 @@ The current version lives in the `VERSION` file at the repository root (plain te
 
 1. Update `VERSION` file with the new version number
 2. Move `## [Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading
-3. Merge the PR — the `release.yml` workflow automatically detects the VERSION change, creates a `vX.Y.Z` tag, runs tests, builds/pushes the Docker image to GHCR, and creates a GitHub Release with auto-generated notes
+3. Review `SECURITY.md` — update if the change affects secrets handling, Docker security posture, network exposure, or security-relevant configuration
+4. Merge the PR — the `release.yml` workflow automatically detects the VERSION change, creates a `vX.Y.Z` tag, runs tests, builds/pushes the Docker image to GHCR, and creates a GitHub Release with auto-generated notes
 
 **Important:** Always bump `VERSION` and update `CHANGELOG.md` in the same PR as the code change. The automation handles tagging and releasing.
 
