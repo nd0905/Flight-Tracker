@@ -16,6 +16,7 @@ from flight_tracker import (
     build_calendar_data,
     build_calendar_html,
     calculate_total_api_requests,
+    get_config_hash,
     get_config_mtime,
     load_config,
     validate_config_change,
@@ -463,6 +464,33 @@ class TestUtilityFunctions(unittest.TestCase):
     def test_get_config_mtime_nonexistent_returns_none(self):
         self.assertIsNone(get_config_mtime("/nonexistent/path.json"))
 
+    def test_get_config_hash_existing_file(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"key": "value"}')
+            path = f.name
+        try:
+            h = get_config_hash(path)
+            self.assertIsNotNone(h)
+            self.assertEqual(len(h), 64)  # SHA-256 hex digest length
+        finally:
+            os.unlink(path)
+
+    def test_get_config_hash_nonexistent_returns_none(self):
+        self.assertIsNone(get_config_hash("/nonexistent/path.json"))
+
+    def test_get_config_hash_detects_content_change(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"version": 1}')
+            path = f.name
+        try:
+            hash1 = get_config_hash(path)
+            with open(path, "w") as f:
+                f.write('{"version": 2}')
+            hash2 = get_config_hash(path)
+            self.assertNotEqual(hash1, hash2)
+        finally:
+            os.unlink(path)
+
     def test_validate_config_change_valid(self):
         good = {
             "amadeus_api_key": "k", "amadeus_api_secret": "s",
@@ -537,6 +565,80 @@ class TestUtilityFunctions(unittest.TestCase):
         # 1 + (3 days * 3 trip lengths) = 1 + 9 = 10
         self.assertEqual(result["total_per_check"], 10)
         self.assertEqual(len(result["per_route"]), 2)
+
+
+# ── config_watcher ────────────────────────────────────────────────────────────
+
+class TestConfigWatcher(unittest.TestCase):
+
+    def test_config_watcher_detects_content_change_without_mtime(self):
+        """Config watcher detects changes via hash even when mtime is unchanged."""
+        from flight_tracker import config_watcher
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"version": 1}')
+            path = f.name
+        try:
+            stop_event = __import__("threading").Event()
+            changed_event = __import__("threading").Event()
+
+            # Patch getmtime to always return the same value (simulates Docker issue)
+            with patch("flight_tracker.get_config_mtime", return_value=1000.0):
+                # Start watcher in a thread with short poll interval
+                import threading
+                t = threading.Thread(
+                    target=config_watcher,
+                    args=(path, stop_event, changed_event),
+                    kwargs={"poll_interval": 1},
+                    daemon=True,
+                )
+                t.start()
+
+                # Modify file content without changing mtime
+                import time
+                time.sleep(0.5)
+                with open(path, "w") as fh:
+                    fh.write('{"version": 2}')
+
+                # Wait for watcher to detect the change
+                detected = changed_event.wait(timeout=5)
+                stop_event.set()
+                t.join(timeout=2)
+
+            self.assertTrue(detected, "Config watcher should detect content change via hash")
+        finally:
+            os.unlink(path)
+
+    def test_config_watcher_detects_mtime_change(self):
+        """Config watcher still detects mtime-based changes."""
+        from flight_tracker import config_watcher
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"version": 1}')
+            path = f.name
+        try:
+            stop_event = __import__("threading").Event()
+            changed_event = __import__("threading").Event()
+
+            import threading, time
+            t = threading.Thread(
+                target=config_watcher,
+                args=(path, stop_event, changed_event),
+                kwargs={"poll_interval": 1},
+                daemon=True,
+            )
+            t.start()
+
+            # Modify file (changes both mtime and content)
+            time.sleep(1.5)
+            with open(path, "w") as fh:
+                fh.write('{"version": 2}')
+
+            detected = changed_event.wait(timeout=5)
+            stop_event.set()
+            t.join(timeout=2)
+
+            self.assertTrue(detected, "Config watcher should detect mtime change")
+        finally:
+            os.unlink(path)
 
 
 # ── build_calendar_data ───────────────────────────────────────────────────────

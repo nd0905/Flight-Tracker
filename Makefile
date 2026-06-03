@@ -46,7 +46,7 @@ run: install
 run-docker: build
 	docker run -d \
 		-p $(PORT):8080 \
-		-v $(PWD)/$(CONFIG_FILE):/app/config.json:ro \
+		-v $(PWD)/$(CONFIG_FILE):/app/config.json \
 		--name $(IMAGE_NAME) \
 		$(IMAGE_NAME)
 	@echo "Flight Tracker running → http://localhost:$(PORT)/status"
